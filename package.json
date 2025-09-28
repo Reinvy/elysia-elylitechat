@@ -6,6 +6,7 @@
     "dev": "bun run --watch src/index.ts"
   },
   "dependencies": {
+    "@elysiajs/openapi": "^1.4.11",
     "@types/uuid": "^10.0.0",
     "bcryptjs": "^3.0.2",
     "elysia": "latest",
