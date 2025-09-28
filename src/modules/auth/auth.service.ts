@@ -1,12 +1,6 @@
 import jwt from "jsonwebtoken";
-import {
-  userDatabase,
-  User,
-  CreateUserDto,
-  LoginDto,
-  AuthResponse,
-  RefreshTokenDto,
-} from "./user.model";
+import { prisma } from "../../config/db";
+import { UserPlain } from "../../../generated/prismabox/User";
 
 export class AuthService {
   private readonly JWT_SECRET: string;
@@ -24,7 +18,7 @@ export class AuthService {
       "your_jwt_refresh_secret_key_please_change_this_in_production";
   }
 
-  async register(userData: CreateUserDto): Promise<AuthResponse> {
+  async register(userData: any): Promise<any> {
     // Validate input
     if (!userData.email || !userData.password || !userData.username) {
       throw new Error("Email, password, and username are required");
@@ -35,22 +29,24 @@ export class AuthService {
     }
 
     // Check if user already exists
-    const existingUser = await userDatabase.findByEmail(userData.email);
+    const existingUser = await prisma.user.findUnique({
+      where: { email: userData.email },
+    });
     if (existingUser) {
       throw new Error("User with this email already exists");
     }
 
-    // Hash password
-    // const hashedPassword = await bcrypt.hash(userData.password, this.SALT_ROUNDS);
     const hashedPassword = await Bun.password.hash(userData.password, {
       algorithm: "bcrypt",
       cost: this.SALT_ROUNDS,
     });
 
     // Create user
-    const user = await userDatabase.create({
-      ...userData,
-      password: hashedPassword,
+    const user = await prisma.user.create({
+      data: {
+        ...userData,
+        password: hashedPassword,
+      },
     });
 
     // Generate tokens
@@ -65,14 +61,16 @@ export class AuthService {
     };
   }
 
-  async login(credentials: LoginDto): Promise<AuthResponse> {
+  async login(credentials: any): Promise<any> {
     // Validate input
     if (!credentials.email || !credentials.password) {
       throw new Error("Email and password are required");
     }
 
     // Find user by email
-    const user = await userDatabase.findByEmail(credentials.email);
+    const user = await prisma.user.findUnique({
+      where: { email: credentials.email },
+    });
     if (!user) {
       throw new Error("Invalid credentials");
     }
@@ -108,7 +106,7 @@ export class AuthService {
   }
 
   async refreshToken(
-    refreshTokenData: RefreshTokenDto
+    refreshTokenData: any
   ): Promise<{ accessToken: string; refreshToken: string }> {
     if (!refreshTokenData.refreshToken) {
       throw new Error("Refresh token is required");
@@ -122,7 +120,9 @@ export class AuthService {
       ) as any;
 
       // Check if user still exists
-      const user = await userDatabase.findById(decoded.userId);
+      const user = await prisma.user.findUnique({
+        where: { id: decoded.userId },
+      });
       if (!user || !user.isActive) {
         throw new Error("User not found or inactive");
       }
@@ -163,7 +163,7 @@ export class AuthService {
     }
 
     // Find user
-    const user = await userDatabase.findById(userId);
+    const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user) {
       throw new Error("User not found");
     }
@@ -184,11 +184,14 @@ export class AuthService {
     });
 
     // Update password
-    await userDatabase.update(userId, { password: hashedNewPassword });
+    await prisma.user.update({
+      where: { id: userId },
+      data: { password: hashedNewPassword },
+    });
   }
 
-  async getUserProfile(userId: string): Promise<Omit<User, "password">> {
-    const user = await userDatabase.findById(userId);
+  async getUserProfile(userId: string): Promise<Omit<any, "password">> {
+    const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user) {
       throw new Error("User not found");
     }

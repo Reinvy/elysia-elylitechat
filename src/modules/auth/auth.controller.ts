@@ -1,9 +1,8 @@
 import { authService } from "./auth.service";
-import { CreateUserDto, LoginDto, RefreshTokenDto } from "./user.model";
 
 export class AuthController {
   // Register business logic
-  async register({ body }: { body: CreateUserDto }) {
+  async register({ body }: { body: any }) {
     try {
       console.log("Register request body:", body);
       const result = await authService.register(body);
@@ -23,7 +22,7 @@ export class AuthController {
   }
 
   // Login business logic
-  async login({ body }: { body: LoginDto }) {
+  async login({ body }: { body: any }) {
     try {
       const result = await authService.login(body);
       return {
@@ -41,7 +40,7 @@ export class AuthController {
   }
 
   // Refresh token business logic
-  async refreshToken({ body }: { body: RefreshTokenDto }) {
+  async refreshToken({ body }: { body: any }) {
     try {
       const result = await authService.refreshToken(body);
       return {
