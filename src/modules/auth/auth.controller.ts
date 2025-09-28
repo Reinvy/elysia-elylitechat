@@ -144,10 +144,12 @@ export class AuthController {
   health() {
     return {
       success: true,
-      message: "Authentication service is running",
+      message: "Auth service is running",
       data: {
         timestamp: new Date().toISOString(),
-        service: "auth-service",
+        service: process.env.SERVICE_NAME || "auth service",
+        uptime_sec: Math.round(process.uptime()),
+        pid: process.pid,
       },
     };
   }
