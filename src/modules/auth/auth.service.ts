@@ -80,11 +80,6 @@ export class AuthService {
       throw new Error("Account is disabled");
     }
 
-    // Verify password
-    // const isPasswordValid = await bcrypt.compare(
-    //   credentials.password,
-    //   user.password
-    // );
     const isPasswordValid = await Bun.password.verify(
       credentials.password,
       user.password
