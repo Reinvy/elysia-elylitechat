@@ -1,6 +1,6 @@
 import jwt from "jsonwebtoken";
+// import { jwt } from "@elysiajs/jwt";
 import { prisma } from "../../config/db";
-import { UserPlain } from "../../../generated/prismabox/User";
 
 export class AuthService {
   private readonly JWT_SECRET: string;

@@ -8,6 +8,7 @@
   "dependencies": {
     "@apollo/server": "^5.0.0",
     "@elysiajs/apollo": "^1.4.0",
+    "@elysiajs/jwt": "^1.4.0",
     "@elysiajs/openapi": "^1.4.11",
     "@prisma/client": "^6.16.2",
     "@types/uuid": "^10.0.0",

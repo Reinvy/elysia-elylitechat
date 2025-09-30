@@ -1,6 +1,5 @@
 import { Elysia, t } from "elysia";
 import { authController } from "./auth.controller.js";
-import { UserInputCreate } from "../../../generated/prismabox/User";
 
 export const authRoute = new Elysia().group("/auth", (app) =>
   app

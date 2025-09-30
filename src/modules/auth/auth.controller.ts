@@ -22,9 +22,10 @@ export class AuthController {
   }
 
   // Login business logic
-  async login({ body }: { body: any }) {
+  async login({ body, set }: { body: any; set: any }) {
     try {
       const result = await authService.login(body);
+      set.status = 200;
       return {
         success: true,
         message: "Login successful",
@@ -114,9 +115,10 @@ export class AuthController {
   }
 
   // Get user profile business logic
-  async getProfile({ headers }: { headers: { authorization: string } }) {
+  async getProfile(ctx: any) {
     try {
-      const authHeader = headers["authorization"];
+      const authHeader = ctx.headers.authorization;
+      console.log(authHeader);
       if (!authHeader || !authHeader.startsWith("Bearer ")) {
         throw new Error("Authorization token required");
       }
