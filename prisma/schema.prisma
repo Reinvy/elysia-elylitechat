@@ -24,4 +24,83 @@ model User {
     createdAt DateTime @default(now())
     updatedAt DateTime @updatedAt
     isActive  Boolean  @default(true)
+
+    // Chat relationships
+    sentMessages     ChatMessage[] @relation("SenderMessages")
+    receivedMessages  ChatMessage[] @relation("ReceiverMessages")
+    conversations     ChatParticipant[]
+}
+
+/**
+ * Represents a chat conversation between two or more users
+ * Supports 1-1 conversations and group conversations
+ */
+model ChatConversation {
+    id          String   @id @default(uuid())
+    title       String?  // Optional title for group conversations
+    createdAt   DateTime @default(now())
+    updatedAt   DateTime @updatedAt
+    isActive    Boolean  @default(true)
+
+    // Relationships
+    participants ChatParticipant[]
+    messages     ChatMessage[]
+
+    // Indexes
+    @@index([createdAt])
+    @@index([isActive])
+}
+
+/**
+ * Represents a participant in a chat conversation
+ * Many-to-many relationship between users and conversations
+ */
+model ChatParticipant {
+    id           String   @id @default(uuid())
+    userId       String
+    conversationId String
+    joinedAt     DateTime @default(now())
+    leftAt       DateTime?
+    isAdmin      Boolean  @default(false)
+    isActive     Boolean  @default(true)
+
+    // Relationships
+    user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+    conversation ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+    // Unique constraint to prevent duplicate participants
+    @@unique([userId, conversationId])
+    
+    // Indexes
+    @@index([userId])
+    @@index([conversationId])
+    @@index([joinedAt])
+}
+
+/**
+ * Represents a chat message between users
+ * Supports real-time messaging with read status tracking
+ */
+model ChatMessage {
+    id           String   @id @default(uuid())
+    content      String
+    senderId     String
+    receiverId   String
+    conversationId String
+    isRead       Boolean  @default(false)
+    readAt       DateTime?
+    createdAt    DateTime @default(now())
+    updatedAt    DateTime @updatedAt
+
+    // Relationships
+    sender       User         @relation("SenderMessages", fields: [senderId], references: [id], onDelete: Cascade)
+    receiver     User         @relation("ReceiverMessages", fields: [receiverId], references: [id], onDelete: Cascade)
+    conversation ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+    // Indexes for performance
+    @@index([senderId])
+    @@index([receiverId])
+    @@index([conversationId])
+    @@index([createdAt])
+    @@index([isRead])
 }
