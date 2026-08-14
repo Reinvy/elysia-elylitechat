@@ -49,6 +49,15 @@ export const authRoute = new Elysia().group("/auth", (app) =>
         tags: ["authentication"],
       },
     })
+    .post("/refresh", authController.refreshToken, {
+      body: t.Object({
+        refreshToken: t.String(),
+      }),
+      detail: {
+        summary: "Refresh access token",
+        tags: ["authentication"],
+      },
+    })
     .post("/logout", authController.logout, {
       body: t.Object({
         refreshToken: t.String(),
@@ -80,6 +89,15 @@ export const authRoute = new Elysia().group("/auth", (app) =>
         tags: ["authentication"],
       },
     })
+    .get("/me", authController.getProfile, {
+      headers: t.Object({
+        authorization: t.String(),
+      }),
+      detail: {
+        summary: "Get authenticated user info",
+        tags: ["authentication"],
+      },
+    })
     .get("/health", authController.health, {
       detail: {
         summary: "Health Check for Auth Service",
@@ -87,3 +105,4 @@ export const authRoute = new Elysia().group("/auth", (app) =>
       },
     })
 );
+

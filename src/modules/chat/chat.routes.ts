@@ -109,6 +109,67 @@ export const chatRoute = new Elysia().group("/chat", (app) =>
       },
     })
     
+    // Edit message
+    .put("/messages/:id", chatController.editMessage, {
+      params: t.Object({
+        id: t.String(),
+      }),
+      body: t.Object({
+        content: t.String({
+          minLength: 1,
+          description: "New message content",
+        }),
+      }),
+      headers: t.Object({
+        authorization: t.String(),
+      }),
+      detail: {
+        summary: "Edit a message sent by current user",
+        tags: ["chat"],
+      },
+    })
+
+    // Soft delete a message
+    .delete("/messages/:id", chatController.deleteMessage, {
+      params: t.Object({
+        id: t.String(),
+      }),
+      headers: t.Object({
+        authorization: t.String(),
+      }),
+      detail: {
+        summary: "Delete a message sent by current user",
+        tags: ["chat"],
+      },
+    })
+
+    // Mark all messages in conversation as read
+    .post("/conversations/:id/read-all", chatController.markConversationAsRead, {
+      params: t.Object({
+        id: t.String(),
+      }),
+      headers: t.Object({
+        authorization: t.String(),
+      }),
+      detail: {
+        summary: "Mark all messages in conversation as read",
+        tags: ["chat"],
+      },
+    })
+
+    // Search users
+    .get("/users/search", chatController.searchUsers, {
+      query: t.Object({
+        q: t.String({
+          description: "Search query for username or email",
+        }),
+      }),
+      detail: {
+        summary: "Search users by username or email",
+        tags: ["chat"],
+      },
+    })
+
     // Create a new conversation
     .post("/conversations", chatController.createConversation, {
       body: t.Object({
@@ -132,4 +193,4 @@ export const chatRoute = new Elysia().group("/chat", (app) =>
         tags: ["chat"],
       },
     })
-);
+);

@@ -1,8 +1,14 @@
-import { chatService, ChatError, ValidationError, NotFoundError, AuthorizationError } from "./chat.service";
+import { chatService, ChatError, ValidationError } from "./chat.service";
+import { authService } from "../auth/auth.service";
 
 export class ChatController {
+  // Utility method to verify access token
+  private verifyAccessToken = (token: string): { userId: string; email: string } => {
+    return authService.verifyAccessToken(token);
+  };
+
   // Get all conversations for the current user
-  async getConversations({ headers, query }: { headers: { authorization: string }; query: any }) {
+  getConversations = async ({ headers, query }: { headers: { authorization: string }; query: any }) => {
     try {
       const authHeader = headers["authorization"];
       if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -28,20 +34,9 @@ export class ChatController {
       };
     } catch (error) {
       console.error("Error fetching conversations:", error);
-      if (error instanceof ChatError) {
-        return {
-          success: false,
-          message: error.message,
-          data: null,
-          error: {
-            code: error.code,
-            details: error instanceof ValidationError ? "Validation failed" : "Chat operation failed"
-          }
-        };
-      }
       return {
         success: false,
-        message: "Failed to fetch conversations",
+        message: error instanceof Error ? error.message : "Failed to fetch conversations",
         data: null,
         error: {
           code: "INTERNAL_ERROR",
@@ -49,10 +44,10 @@ export class ChatController {
         }
       };
     }
-  }
+  };
 
   // Get a specific conversation by ID
-  async getConversation({ headers, params }: { headers: { authorization: string }; params: { id: string } }) {
+  getConversation = async ({ headers, params }: { headers: { authorization: string }; params: { id: string } }) => {
     try {
       const authHeader = headers["authorization"];
       if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -77,10 +72,10 @@ export class ChatController {
         data: null,
       };
     }
-  }
+  };
 
   // Get messages for a specific conversation
-  async getMessages({ headers, params, query }: { headers: { authorization: string }; params: { id: string }; query: any }) {
+  getMessages = async ({ headers, params, query }: { headers: { authorization: string }; params: { id: string }; query: any }) => {
     try {
       const authHeader = headers["authorization"];
       if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -112,10 +107,10 @@ export class ChatController {
         data: null,
       };
     }
-  }
+  };
 
   // Get a specific message by ID
-  async getMessage({ headers, params }: { headers: { authorization: string }; params: { id: string } }) {
+  getMessage = async ({ headers, params }: { headers: { authorization: string }; params: { id: string } }) => {
     try {
       const authHeader = headers["authorization"];
       if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -140,10 +135,10 @@ export class ChatController {
         data: null,
       };
     }
-  }
+  };
 
   // Send a new message
-  async sendMessage({ headers, body }: { headers: { authorization: string }; body: any }) {
+  sendMessage = async ({ headers, body }: { headers: { authorization: string }; body: any }) => {
     try {
       const authHeader = headers["authorization"];
       if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -153,12 +148,12 @@ export class ChatController {
       const token = authHeader.substring(7);
       const decoded = this.verifyAccessToken(token);
       
-      const result = await chatService.sendMessage(decoded.userId, body);
+      const message = await chatService.sendMessage(decoded.userId, body);
 
       return {
         success: true,
         message: "Message sent successfully",
-        data: result,
+        data: message,
       };
     } catch (error) {
       console.error("Error sending message:", error);
@@ -175,7 +170,7 @@ export class ChatController {
       }
       return {
         success: false,
-        message: "Failed to send message",
+        message: error instanceof Error ? error.message : "Failed to send message",
         data: null,
         error: {
           code: "INTERNAL_ERROR",
@@ -183,10 +178,66 @@ export class ChatController {
         }
       };
     }
-  }
+  };
+
+  // Edit an existing message
+  editMessage = async ({ headers, params, body }: { headers: { authorization: string }; params: { id: string }; body: { content: string } }) => {
+    try {
+      const authHeader = headers["authorization"];
+      if (!authHeader || !authHeader.startsWith("Bearer ")) {
+        throw new Error("Authorization token required");
+      }
+      
+      const token = authHeader.substring(7);
+      const decoded = this.verifyAccessToken(token);
+      
+      const message = await chatService.editMessage(decoded.userId, params.id, body.content);
+
+      return {
+        success: true,
+        message: "Message edited successfully",
+        data: message,
+      };
+    } catch (error) {
+      console.error("Error editing message:", error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : "Failed to edit message",
+        data: null,
+      };
+    }
+  };
+
+  // Soft delete a message
+  deleteMessage = async ({ headers, params }: { headers: { authorization: string }; params: { id: string } }) => {
+    try {
+      const authHeader = headers["authorization"];
+      if (!authHeader || !authHeader.startsWith("Bearer ")) {
+        throw new Error("Authorization token required");
+      }
+      
+      const token = authHeader.substring(7);
+      const decoded = this.verifyAccessToken(token);
+      
+      const message = await chatService.deleteMessage(decoded.userId, params.id);
+
+      return {
+        success: true,
+        message: "Message deleted successfully",
+        data: message,
+      };
+    } catch (error) {
+      console.error("Error deleting message:", error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : "Failed to delete message",
+        data: null,
+      };
+    }
+  };
 
   // Mark messages as read
-  async markMessagesAsRead({ headers, body }: { headers: { authorization: string }; body: any }) {
+  markMessagesAsRead = async ({ headers, body }: { headers: { authorization: string }; body: any }) => {
     try {
       const authHeader = headers["authorization"];
       if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -205,31 +256,75 @@ export class ChatController {
       };
     } catch (error) {
       console.error("Error marking messages as read:", error);
-      if (error instanceof ChatError) {
-        return {
-          success: false,
-          message: error.message,
-          data: null,
-          error: {
-            code: error.code,
-            details: error instanceof ValidationError ? "Validation failed" : "Chat operation failed"
-          }
-        };
-      }
       return {
         success: false,
-        message: "Failed to mark messages as read",
+        message: error instanceof Error ? error.message : "Failed to mark messages as read",
         data: null,
-        error: {
-          code: "INTERNAL_ERROR",
-          details: "An unexpected error occurred"
-        }
       };
     }
-  }
+  };
+
+  // Mark all messages in a conversation as read
+  markConversationAsRead = async ({ headers, params }: { headers: { authorization: string }; params: { id: string } }) => {
+    try {
+      const authHeader = headers["authorization"];
+      if (!authHeader || !authHeader.startsWith("Bearer ")) {
+        throw new Error("Authorization token required");
+      }
+      
+      const token = authHeader.substring(7);
+      const decoded = this.verifyAccessToken(token);
+      
+      const result = await chatService.markConversationAsRead(decoded.userId, params.id);
+
+      return {
+        success: true,
+        message: "All messages marked as read successfully",
+        data: { success: result },
+      };
+    } catch (error) {
+      console.error("Error marking conversation as read:", error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : "Failed to mark conversation as read",
+        data: null,
+      };
+    }
+  };
+
+  // Search users
+  searchUsers = async ({ headers, query }: { headers: { authorization: string }; query: { q: string } }) => {
+    try {
+      const authHeader = headers["authorization"];
+      let currentUserId: string | undefined;
+      if (authHeader && authHeader.startsWith("Bearer ")) {
+        try {
+          const decoded = this.verifyAccessToken(authHeader.substring(7));
+          currentUserId = decoded.userId;
+        } catch {
+          // Optional user context
+        }
+      }
+      
+      const users = await chatService.searchUsers(query?.q || "", currentUserId);
+
+      return {
+        success: true,
+        message: "Users retrieved successfully",
+        data: users,
+      };
+    } catch (error) {
+      console.error("Error searching users:", error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : "Failed to search users",
+        data: [],
+      };
+    }
+  };
 
   // Create a new conversation
-  async createConversation({ headers, body }: { headers: { authorization: string }; body: any }) {
+  createConversation = async ({ headers, body }: { headers: { authorization: string }; body: any }) => {
     try {
       const authHeader = headers["authorization"];
       if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -248,31 +343,16 @@ export class ChatController {
       };
     } catch (error) {
       console.error("Error creating conversation:", error);
-      if (error instanceof ChatError) {
-        return {
-          success: false,
-          message: error.message,
-          data: null,
-          error: {
-            code: error.code,
-            details: error instanceof ValidationError ? "Validation failed" : "Chat operation failed"
-          }
-        };
-      }
       return {
         success: false,
-        message: "Failed to create conversation",
+        message: error instanceof Error ? error.message : "Failed to create conversation",
         data: null,
-        error: {
-          code: "INTERNAL_ERROR",
-          details: "An unexpected error occurred"
-        }
       };
     }
-  }
+  };
 
   // Health check business logic
-  health() {
+  health = () => {
     return {
       success: true,
       message: "Chat service is running",
@@ -283,22 +363,7 @@ export class ChatController {
         pid: process.pid,
       },
     };
-  }
-
-  // Utility method to verify access token
-  private verifyAccessToken(token: string): { userId: string; email: string } {
-    try {
-      // In a real implementation, you would use JWT verification here
-      // For now, we'll use a placeholder
-      // const decoded = jwt.verify(token, process.env.JWT_SECRET) as any;
-      // return { userId: decoded.userId, email: decoded.email };
-      
-      // Placeholder for testing - in production, implement proper JWT verification
-      return { userId: 'test-user-id', email: 'test@example.com' };
-    } catch (error) {
-      throw new Error("Invalid access token");
-    }
-  }
+  };
 }
 
 export const chatController = new ChatController();

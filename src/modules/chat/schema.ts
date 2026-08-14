@@ -26,6 +26,18 @@ export const chatTypeDefs = gql`
     createdAt: String!
     updatedAt: String!
     isRead: Boolean!
+    isEdited: Boolean!
+    isDeleted: Boolean!
+  }
+
+  """
+  Represents a typing event
+  """
+  type TypingEvent {
+    userId: ID!
+    username: String!
+    conversationId: ID!
+    isTyping: Boolean!
   }
 
   """
@@ -47,6 +59,7 @@ export const chatTypeDefs = gql`
   input CreateMessageInput {
     content: String!
     receiverId: ID!
+    conversationId: ID
   }
 
   """
@@ -109,6 +122,11 @@ export const chatTypeDefs = gql`
     Get a specific message by ID
     """
     getMessage(id: ID!): ChatMessage
+
+    """
+    Search users by username or email
+    """
+    searchUsers(query: String!): [User!]!
   }
 
   """
@@ -121,9 +139,24 @@ export const chatTypeDefs = gql`
     sendMessage(input: CreateMessageInput!): ChatMessage!
 
     """
+    Edit a message sent by current user
+    """
+    editMessage(messageId: ID!, content: String!): ChatMessage!
+
+    """
+    Soft delete a message sent by current user
+    """
+    deleteMessage(messageId: ID!): ChatMessage!
+
+    """
     Mark messages as read in a conversation
     """
     markMessagesAsRead(input: MarkMessagesAsReadInput!): Boolean!
+
+    """
+    Mark all messages in a conversation as read
+    """
+    markConversationAsRead(conversationId: ID!): Boolean!
 
     """
     Create a new conversation (if needed)
@@ -149,5 +182,11 @@ export const chatTypeDefs = gql`
     Receive updates when messages are marked as read
     """
     messagesRead(conversationId: ID!): ChatMessage!
+
+    """
+    Receive typing indicator events in a conversation
+    """
+    typingStatus(conversationId: ID!): TypingEvent!
   }
 `;
+

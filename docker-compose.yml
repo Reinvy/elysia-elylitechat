@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  elylitechat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: elylitechat-app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DATABASE_URL=postgresql://postgres:root@postgres:5432/elylitechat?schema=public
+      - JWT_SECRET=elylitechat-super-secret-jwt-key
+      - JWT_REFRESH_SECRET=elylitechat-super-secret-refresh-key
+    depends_on:
+      - postgres
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: elylitechat-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: root
+      POSTGRES_DB: elylitechat
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:

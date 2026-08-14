@@ -146,23 +146,24 @@ This checklist tracks the implementation progress of ElyLiteChat. Every AI Agent
 - [x] WebSocket handler (`/ws`) for live message streaming.
 - [x] Postman API documentation files generated.
 
-### Phase 3: WebSocket Hardening & Subscriptions `[PENDING]`
-- [ ] GraphQL Subscriptions implementation (`messageAdded`, `messageStatusUpdated`) over WebSocket.
-- [ ] Heartbeat ping-pong mechanism on `/ws` to clean up dead connections.
-- [ ] Client reconnection and missed message replay protocol.
-- [ ] Room/Conversation subscription filtering to prevent broadcast leak across conversations.
+### Phase 3: WebSocket Hardening & Subscriptions `[COMPLETED]`
+- [x] GraphQL Subscriptions implementation (`messageAdded`, `newMessage`, `messagesRead`, `typingStatus`) over WebSocket.
+- [x] Heartbeat ping-pong mechanism on `/ws` to clean up dead connections.
+- [x] Client reconnection and missed message replay protocol.
+- [x] Room/Conversation subscription filtering to prevent broadcast leak across conversations.
 
-### Phase 4: Enhanced Chat Features `[PENDING]`
-- [ ] Message soft-delete (`isDeleted = true`) and edit functionality.
-- [ ] Ephemeral typing indicator broadcast via WebSocket.
-- [ ] Unread message counter aggregate query per conversation.
-- [ ] User discovery/search endpoint (`GET /users/search?q=`).
+### Phase 4: Enhanced Chat Features `[COMPLETED]`
+- [x] Message soft-delete (`isDeleted = true`) and edit functionality.
+- [x] Ephemeral typing indicator broadcast via WebSocket & PubSub.
+- [x] Unread message counter aggregate query per conversation.
+- [x] User discovery/search endpoint (`GET /chat/users/search?q=` and `searchUsers`).
 
-### Phase 5: Automated Testing & Production Readiness `[PENDING]`
-- [ ] Vitest test suite for Auth (register, login, token refresh).
-- [ ] Vitest test suite for Chat (REST endpoints & GraphQL resolvers).
-- [ ] Environment switch guide (PostgreSQL vs SQLite for local zero-config testing).
-- [ ] Lightweight Docker containerization (`Dockerfile`).
+### Phase 5: Automated Testing & Production Readiness `[COMPLETED]`
+- [x] Vitest/Bun test suite for Auth (register, login, token refresh).
+- [x] Vitest/Bun test suite for Chat (REST endpoints & GraphQL resolvers).
+- [x] In-memory WebSocket & PubSub engine test suite.
+- [x] Lightweight Docker containerization (`Dockerfile` and `docker-compose.yml`).
+
 
 ---
 

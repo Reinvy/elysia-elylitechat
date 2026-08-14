@@ -1,35 +1,32 @@
-import { WebSocketServer } from 'ws';
-import { makeServer } from 'graphql-ws';
-import { ApolloServer } from '@apollo/server';
-import { makeExecutableSchema } from '@graphql-tools/schema';
-import { chatTypeDefs } from './schema.js';
-import { chatResolvers } from './resolvers.js';
 import { prisma } from '../../config/db.js';
+import { authService } from '../auth/auth.service.js';
 
 // Connection context type for WebSocket connections
-export interface WebSocketContext {
-  connection: {
-    context: {
-      user?: {
-        id: string;
-        email: string;
-        username: string;
-      };
-    };
-  };
+export interface AuthenticatedUser {
+  id: string;
+  email: string;
+  username: string;
 }
 
-// Pub/Sub implementation for message broadcasting
+export interface ClientConnection {
+  id: string;
+  ws: any;
+  user: AuthenticatedUser;
+  lastPing: number;
+  conversations: Set<string>;
+}
+
+// In-Memory Pub/Sub implementation for GraphQL and WS message broadcasting
 export class PubSub {
-  private subscriptions: Map<string, Set<Function>> = new Map();
-  
+  private subscriptions: Map<string, Set<(data: any) => void>> = new Map();
+
   // Subscribe to a specific topic
-  subscribe(topic: string, callback: Function): () => void {
+  subscribe(topic: string, callback: (data: any) => void): () => void {
     if (!this.subscriptions.has(topic)) {
       this.subscriptions.set(topic, new Set());
     }
     this.subscriptions.get(topic)!.add(callback);
-    
+
     // Return unsubscribe function
     return () => {
       const topicCallbacks = this.subscriptions.get(topic);
@@ -41,12 +38,12 @@ export class PubSub {
       }
     };
   }
-  
+
   // Publish a message to a topic
   publish(topic: string, data: any): void {
     const callbacks = this.subscriptions.get(topic);
     if (callbacks) {
-      callbacks.forEach(callback => {
+      callbacks.forEach((callback) => {
         try {
           callback(data);
         } catch (error) {
@@ -55,249 +52,257 @@ export class PubSub {
       });
     }
   }
-  
-  // Get all active subscriptions for debugging
-  getSubscriptions(): Map<string, number> {
-    const result = new Map<string, number>();
-    this.subscriptions.forEach((callbacks, topic) => {
-      result.set(topic, callbacks.size);
-    });
-    return result;
-  }
-  
+
   // Create an async iterator for GraphQL subscriptions
   asyncIterator(topic: string): AsyncIterableIterator<any> {
     const self = this;
+    const queue: any[] = [];
+    let resolveQueue: ((value: any) => void) | null = null;
+
+    const unsubscribe = self.subscribe(topic, (data: any) => {
+      if (resolveQueue) {
+        const resolve = resolveQueue;
+        resolveQueue = null;
+        resolve({ value: data, done: false });
+      } else {
+        queue.push(data);
+      }
+    });
+
     const iterator: AsyncIterableIterator<any> = {
       [Symbol.asyncIterator]: () => iterator,
       next: async () => {
+        if (queue.length > 0) {
+          return { value: queue.shift(), done: false };
+        }
         return new Promise((resolve) => {
-          const unsubscribe = self.subscribe(topic, (data: any) => {
-            unsubscribe();
-            resolve({ value: data, done: false });
-          });
-          
-          // Set a timeout to avoid hanging
-          setTimeout(() => {
-            unsubscribe();
-            resolve({ value: undefined, done: true });
-          }, 30000); // 30 second timeout
+          resolveQueue = resolve;
         });
       },
       return: async () => {
+        unsubscribe();
         return { value: undefined, done: true };
-      }
+      },
     };
     return iterator;
   }
 }
 
-// Global pub/sub instance
 export const pubSub = new PubSub();
 
-// Active connections management
-export class ConnectionManager {
-  private connections: Map<string, WebSocketContext> = new Map();
-  private userConnections: Map<string, Set<string>> = new Map();
-  
-  // Add a new connection
-  addConnection(connectionId: string, context: WebSocketContext): void {
-    this.connections.set(connectionId, context);
-    
-    const user = context.connection.context.user;
-    if (user) {
-      if (!this.userConnections.has(user.id)) {
-        this.userConnections.set(user.id, new Set());
-      }
-      this.userConnections.get(user.id)!.add(connectionId);
-    }
-    
-    console.log(`WebSocket connection established: ${connectionId}`);
+// Active connections manager
+export class WebSocketConnectionManager {
+  private connections: Map<string, ClientConnection> = new Map();
+  private userToConnections: Map<string, Set<string>> = new Map();
+  private heartbeatInterval: Timer | null = null;
+
+  constructor() {
+    this.startHeartbeat();
   }
-  
-  // Remove a connection
+
+  // Start 30-second ping/pong heartbeat
+  private startHeartbeat(): void {
+    this.heartbeatInterval = setInterval(() => {
+      const now = Date.now();
+      const deadConnectionIds: string[] = [];
+
+      this.connections.forEach((conn, id) => {
+        // If no activity or pong in 60s, close
+        if (now - conn.lastPing > 60000) {
+          deadConnectionIds.push(id);
+        } else {
+          try {
+            conn.ws.send(JSON.stringify({ type: 'PING', timestamp: now }));
+          } catch {
+            deadConnectionIds.push(id);
+          }
+        }
+      });
+
+      deadConnectionIds.forEach((id) => {
+        this.removeConnection(id);
+      });
+    }, 30000);
+  }
+
+  // Add connection
+  addConnection(connectionId: string, ws: any, user: AuthenticatedUser): ClientConnection {
+    const conn: ClientConnection = {
+      id: connectionId,
+      ws,
+      user,
+      lastPing: Date.now(),
+      conversations: new Set(),
+    };
+
+    this.connections.set(connectionId, conn);
+
+    if (!this.userToConnections.has(user.id)) {
+      this.userToConnections.set(user.id, new Set());
+    }
+    this.userToConnections.get(user.id)!.add(connectionId);
+
+    console.log(`[WS] Client connected: ${user.username} (${user.id}) [Conn: ${connectionId}]`);
+    return conn;
+  }
+
+  // Remove connection
   removeConnection(connectionId: string): void {
-    const context = this.connections.get(connectionId);
-    if (context) {
-      const user = context.connection.context.user;
-      if (user && this.userConnections.has(user.id)) {
-        const userConnIds = this.userConnections.get(user.id)!;
-        userConnIds.delete(connectionId);
-        if (userConnIds.size === 0) {
-          this.userConnections.delete(user.id);
+    const conn = this.connections.get(connectionId);
+    if (conn) {
+      const userConns = this.userToConnections.get(conn.user.id);
+      if (userConns) {
+        userConns.delete(connectionId);
+        if (userConns.size === 0) {
+          this.userToConnections.delete(conn.user.id);
         }
       }
+      try {
+        conn.ws.close();
+      } catch {}
+      this.connections.delete(connectionId);
+      console.log(`[WS] Client disconnected: ${conn.user.username} [Conn: ${connectionId}]`);
     }
-    
-    this.connections.delete(connectionId);
-    console.log(`WebSocket connection closed: ${connectionId}`);
   }
-  
-  // Get connections for a specific user
-  getUserConnections(userId: string): Set<string> {
-    return this.userConnections.get(userId) || new Set();
+
+  // Update ping timestamp
+  recordPong(connectionId: string): void {
+    const conn = this.connections.get(connectionId);
+    if (conn) {
+      conn.lastPing = Date.now();
+    }
   }
-  
-  // Get all active connections
-  getAllConnections(): Map<string, WebSocketContext> {
-    return new Map(this.connections);
+
+  // Join a conversation room
+  joinConversation(connectionId: string, conversationId: string): void {
+    const conn = this.connections.get(connectionId);
+    if (conn) {
+      conn.conversations.add(conversationId);
+    }
   }
-  
-  // Get connection count
+
+  // Leave a conversation room
+  leaveConversation(connectionId: string, conversationId: string): void {
+    const conn = this.connections.get(connectionId);
+    if (conn) {
+      conn.conversations.delete(conversationId);
+    }
+  }
+
+  // Get active connection for id
+  getConnection(connectionId: string): ClientConnection | undefined {
+    return this.connections.get(connectionId);
+  }
+
+  // Total active connection count
   getConnectionCount(): number {
     return this.connections.size;
   }
-}
 
-// Global connection manager
-export const connectionManager = new ConnectionManager();
+  // Send message to all sockets of a specific user
+  sendToUser(userId: string, data: any): void {
+    const connIds = this.userToConnections.get(userId);
+    if (!connIds) return;
 
-// WebSocket server setup
-export function setupWebSocketServer(server: any): WebSocketServer {
-  const wsServer = new WebSocketServer({
-    server,
-    path: '/graphql',
-  });
-
-  // Create executable schema
-  const schema = makeExecutableSchema({
-    typeDefs: chatTypeDefs,
-    resolvers: chatResolvers,
-  });
-
-  // Setup GraphQL WebSocket server
-  const wsServerInstance = makeServer(
-    {
-      schema,
-      context: async (ctx: any) => {
-        // Extract JWT token from connection parameters
-        const { connectionParams } = ctx;
-        const token = connectionParams?.token as string;
-        
-        let user = null;
-        
-        // TODO: Implement JWT verification
-        // For now, we'll use a placeholder user
-        if (token) {
-          try {
-            // In a real implementation, you would verify the JWT token here
-            // const decoded = jwt.verify(token, process.env.JWT_SECRET);
-            // user = decoded;
-            
-            // Placeholder user for testing
-            user = {
-              id: 'test-user-id',
-              email: 'test@example.com',
-              username: 'testuser'
-            };
-          } catch (error) {
-            console.error('JWT verification failed:', error);
-          }
+    const payload = typeof data === 'string' ? data : JSON.stringify(data);
+    connIds.forEach((connId) => {
+      const conn = this.connections.get(connId);
+      if (conn) {
+        try {
+          conn.ws.send(payload);
+        } catch (err) {
+          console.error(`[WS] Failed to send message to connection ${connId}:`, err);
         }
-        
-        return {
-          user,
-        };
-      },
-      onConnect: (ctx: any) => {
-        console.log('WebSocket client connected');
-        connectionManager.addConnection(ctx.connection.id, ctx);
-      },
-      onDisconnect: (ctx: any) => {
-        console.log('WebSocket client disconnected');
-        connectionManager.removeConnection(ctx.connection.id);
-      },
-      onError: (err: any, ctx: any) => {
-        console.error('WebSocket error:', err);
-        if (ctx) {
-          connectionManager.removeConnection(ctx.connection.id);
-        }
-      },
-    }
-  );
-
-  // Listen for WebSocket connections and forward them to the GraphQL server
-  wsServer.on('connection', (ws, req) => {
-    wsServerInstance.opened(ws as any, req);
-  });
-
-  return wsServer;
-}
-
-// Helper function to broadcast messages to conversation participants
-export function broadcastToConversationParticipants(
-  conversationId: string,
-  message: any,
-  excludeUserId?: string
-): void {
-  // Get all participants in the conversation
-  // TODO: Implement this using Prisma to get conversation participants
-  // For now, we'll broadcast to all connected users
-  
-  const messageData = {
-    type: 'messageAdded',
-    payload: message,
-    conversationId,
-  };
-  
-  // Broadcast to all connected users (in production, filter by conversation participants)
-  connectionManager.getAllConnections().forEach((context, connectionId) => {
-    const user = context.connection.context.user;
-    if (user && user.id !== excludeUserId) {
-      try {
-        (context.connection as any).send(JSON.stringify(messageData));
-      } catch (error) {
-        console.error(`Error sending message to connection ${connectionId}:`, error);
       }
+    });
+  }
+
+  // Broadcast event to all participants of a conversation
+  async broadcastToConversation(conversationId: string, eventType: string, payload: any, excludeUserId?: string): Promise<void> {
+    try {
+      const participants = await prisma.chatParticipant.findMany({
+        where: {
+          conversationId,
+          isActive: true,
+        },
+        select: {
+          userId: true,
+        },
+      });
+
+      const messageEvent = {
+        type: eventType,
+        conversationId,
+        payload,
+        timestamp: new Date().toISOString(),
+      };
+
+      participants.forEach((p) => {
+        if (p.userId !== excludeUserId) {
+          this.sendToUser(p.userId, messageEvent);
+        }
+      });
+    } catch (error) {
+      console.error(`[WS] Failed to broadcast to conversation ${conversationId}:`, error);
     }
-  });
+  }
+
+  // Clean up timer
+  cleanup(): void {
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = null;
+    }
+    this.connections.clear();
+    this.userToConnections.clear();
+  }
 }
 
-// Helper function to broadcast read status updates
-export function broadcastReadStatusUpdate(
-  conversationId: string,
-  messageId: string,
-  userId: string
-): void {
-  const readStatusData = {
-    type: 'messagesRead',
-    payload: {
-      messageId,
+export const connectionManager = new WebSocketConnectionManager();
+
+// Broadcast helpers
+export async function broadcastNewMessage(message: any): Promise<void> {
+  // 1. Publish to GraphQL Subscriptions
+  pubSub.publish(`MESSAGE_ADDED:${message.conversationId}`, { messageAdded: message });
+  pubSub.publish(`NEW_MESSAGE:${message.receiverId}`, { newMessage: message });
+
+  // 2. Direct WS broadcast to conversation participants
+  await connectionManager.broadcastToConversation(message.conversationId, 'NEW_MESSAGE', message);
+}
+
+export async function broadcastMessageEdited(message: any): Promise<void> {
+  pubSub.publish(`MESSAGE_ADDED:${message.conversationId}`, { messageAdded: message });
+  await connectionManager.broadcastToConversation(message.conversationId, 'MESSAGE_EDITED', message);
+}
+
+export async function broadcastMessageDeleted(message: any): Promise<void> {
+  await connectionManager.broadcastToConversation(message.conversationId, 'MESSAGE_DELETED', message);
+}
+
+export async function broadcastReadStatusUpdate(conversationId: string, userId: string): Promise<void> {
+  pubSub.publish(`MESSAGES_READ:${conversationId}`, {
+    messagesRead: {
       conversationId,
       userId,
-      timestamp: new Date().toISOString(),
+      readAt: new Date().toISOString(),
     },
-  };
-  
-  // Broadcast to all connected users in the conversation
-  connectionManager.getAllConnections().forEach((context, connectionId) => {
-    const user = context.connection.context.user;
-    if (user && user.id !== userId) {
-      try {
-        (context.connection as any).send(JSON.stringify(readStatusData));
-      } catch (error) {
-        console.error(`Error sending read status to connection ${connectionId}:`, error);
-      }
-    }
   });
+
+  await connectionManager.broadcastToConversation(conversationId, 'MESSAGES_READ', {
+    conversationId,
+    userId,
+    readAt: new Date().toISOString(),
+  }, userId);
 }
 
-// Helper function to broadcast new messages
-export function broadcastNewMessage(message: any): void {
-  const messageData = {
-    type: 'newMessage',
-    payload: message,
+export async function broadcastTypingEvent(conversationId: string, user: AuthenticatedUser, isTyping: boolean): Promise<void> {
+  const typingEvent = {
+    userId: user.id,
+    username: user.username,
+    conversationId,
+    isTyping,
   };
-  
-  // Broadcast to all connected users
-  connectionManager.getAllConnections().forEach((context, connectionId) => {
-    const user = context.connection.context.user;
-    if (user) {
-      try {
-        (context.connection as any).send(JSON.stringify(messageData));
-      } catch (error) {
-        console.error(`Error broadcasting new message to connection ${connectionId}:`, error);
-      }
-    }
-  });
+
+  pubSub.publish(`TYPING_STATUS:${conversationId}`, { typingStatus: typingEvent });
+  await connectionManager.broadcastToConversation(conversationId, 'TYPING_STATUS', typingEvent, user.id);
 }

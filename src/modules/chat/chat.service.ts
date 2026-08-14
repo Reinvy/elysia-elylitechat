@@ -697,6 +697,180 @@ export class ChatService {
     }
   }
 
+  // Edit message
+  async editMessage(userId: string, messageId: string, newContent: string): Promise<any> {
+    if (!messageId || typeof messageId !== 'string') {
+      throw new ValidationError('Message ID is required');
+    }
+    if (!newContent?.trim()) {
+      throw new ValidationError('Message content cannot be empty');
+    }
+
+    const message = await prisma.chatMessage.findUnique({
+      where: { id: messageId }
+    });
+
+    if (!message) {
+      throw new NotFoundError('Message not found');
+    }
+
+    if (message.senderId !== userId) {
+      throw new AuthorizationError('You can only edit your own messages');
+    }
+
+    if (message.isDeleted) {
+      throw new ValidationError('Cannot edit a deleted message');
+    }
+
+    const updated = await prisma.chatMessage.update({
+      where: { id: messageId },
+      data: {
+        content: newContent.trim(),
+        isEdited: true,
+        updatedAt: new Date()
+      },
+      include: {
+        sender: {
+          select: {
+            id: true,
+            email: true,
+            username: true
+          }
+        }
+      }
+    });
+
+    return updated;
+  }
+
+  // Delete message (soft delete)
+  async deleteMessage(userId: string, messageId: string): Promise<any> {
+    if (!messageId || typeof messageId !== 'string') {
+      throw new ValidationError('Message ID is required');
+    }
+
+    const message = await prisma.chatMessage.findUnique({
+      where: { id: messageId }
+    });
+
+    if (!message) {
+      throw new NotFoundError('Message not found');
+    }
+
+    if (message.senderId !== userId) {
+      throw new AuthorizationError('You can only delete your own messages');
+    }
+
+    const deleted = await prisma.chatMessage.update({
+      where: { id: messageId },
+      data: {
+        content: "This message was deleted",
+        isDeleted: true,
+        updatedAt: new Date()
+      },
+      include: {
+        sender: {
+          select: {
+            id: true,
+            email: true,
+            username: true
+          }
+        }
+      }
+    });
+
+    return deleted;
+  }
+
+  // Mark all messages in a conversation as read
+  async markConversationAsRead(userId: string, conversationId: string): Promise<boolean> {
+    if (!conversationId || typeof conversationId !== 'string') {
+      throw new ValidationError('Conversation ID is required');
+    }
+
+    const isParticipant = await this.isConversationParticipant(conversationId, userId);
+    if (!isParticipant) {
+      throw new AuthorizationError('Access denied: You are not a participant in this conversation');
+    }
+
+    await prisma.chatMessage.updateMany({
+      where: {
+        conversationId,
+        receiverId: userId,
+        isRead: false
+      },
+      data: {
+        isRead: true,
+        readAt: new Date()
+      }
+    });
+
+    return true;
+  }
+
+  // Search users for starting conversations
+  async searchUsers(query: string, currentUserId?: string): Promise<any[]> {
+    if (!query || query.trim().length === 0) {
+      return [];
+    }
+
+    const users = await prisma.user.findMany({
+      where: {
+        AND: [
+          currentUserId ? { id: { not: currentUserId } } : {},
+          { isActive: true },
+          {
+            OR: [
+              { username: { contains: query.trim(), mode: 'insensitive' } },
+              { email: { contains: query.trim(), mode: 'insensitive' } }
+            ]
+          }
+        ]
+      },
+      select: {
+        id: true,
+        username: true,
+        email: true,
+        isActive: true,
+        createdAt: true
+      },
+      take: 20
+    });
+
+    return users;
+  }
+
+  // Get missed messages for client replay on reconnection
+  async getMissedMessages(userId: string, since: Date): Promise<any[]> {
+    return prisma.chatMessage.findMany({
+      where: {
+        conversation: {
+          participants: {
+            some: {
+              userId,
+              isActive: true
+            }
+          }
+        },
+        createdAt: {
+          gt: since
+        }
+      },
+      include: {
+        sender: {
+          select: {
+            id: true,
+            email: true,
+            username: true
+          }
+        }
+      },
+      orderBy: {
+        createdAt: 'asc'
+      }
+    });
+  }
+
   // Get health status
   health() {
     return {
