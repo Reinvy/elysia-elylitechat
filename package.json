@@ -10,7 +10,7 @@
     "@elysiajs/apollo": "^1.4.0",
     "@elysiajs/jwt": "^1.4.0",
     "@elysiajs/openapi": "^1.4.11",
-    "@prisma/client": "^6.16.2",
+    "@prisma/client": "^7.0.0",
     "@types/uuid": "^10.0.0",
     "@types/ws": "^8.18.1",
     "elysia": "latest",
@@ -26,7 +26,7 @@
   "devDependencies": {
     "@types/jsonwebtoken": "^9.0.10",
     "bun-types": "latest",
-    "prisma": "^6.16.2"
+    "prisma": "^7.0.0"
   },
   "module": "src/index.js"
 }
