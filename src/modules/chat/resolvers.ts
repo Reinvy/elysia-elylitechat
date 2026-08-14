@@ -86,6 +86,8 @@ export const chatResolvers = {
     ) => {
       // requireAuth(context);
 
+      console.log("context:", context);
+
       const { participantId, limit = 20, cursor } = filter || {};
       const currentUserId = context.user!.id;
 
@@ -732,7 +734,7 @@ export const chatResolvers = {
     newMessage: {
       subscribe: (_: any, __: any, context: any) => {
         // requireAuth(context);
-
+        console.log("Subscribing to newMessage for user:", context.user);
         // Subscribe to all messages where the user is either sender or receiver
         return pubSub.asyncIterator(`NEW_MESSAGE:${context.user!.id}`);
       },

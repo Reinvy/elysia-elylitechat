@@ -86,7 +86,6 @@ const app = new Elysia()
         try {
           const decoded = authService.verifyAccessToken(token);
           const { prisma } = await import("./config/db.js");
-
           const user = await prisma.user.findUnique({
             where: { id: decoded.userId },
             select: {

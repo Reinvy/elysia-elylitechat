@@ -21,6 +21,7 @@ export const authRoute = new Elysia().group("/auth", (app) =>
       detail: {
         summary: "Register a new user",
         tags: ["authentication"],
+        
       },
     })
     .post("/login", authController.login, {
