@@ -169,7 +169,7 @@ This checklist tracks the implementation progress of ElyLiteChat. Every AI Agent
 ### Phase 6: ElyChat Unification (Eden + Redis + Interop) `[IN PROGRESS]`
 - [x] Migrate in-memory broadcast to single-node Redis pub/sub (`room:<id>`, typing 3s debounce, presence TTL 60s, fixed-window rate limit) — `src/redis.ts` + canonical frames (`chat:new/delivered/read/typing`, `message:update`).
 - [x] Remove Apollo/GraphQL code and deps (`schema.ts`, `resolvers.ts`, `@elysiajs/apollo`, `graphql`, `graphql-ws`, `ws` removed; `GRAPHQL_API_DOCUMENTATION.md` deleted).
-- [ ] Add interop columns (`clientMsgId`, `ciphertext`, `fallbackText/Meta`, `ctaLabel/Url`) per `docs/technical/data_models.md` → **Phase 2 (Fase 2)**.
+- [x] Add interop columns (`clientMsgId` unique, `ciphertext`, `fallbackText/Meta`, `ctaLabel/Url`, `MessageType` enum) + `Session`/`Reaction`/`ReadReceipt` + trigram/BRIN indexes — migration `20260904220000_add_interop_session_reactions` applied, 22/22 tests green.
 - [x] Tighten CORS (allowlist `CORS_ORIGINS`, no `*` with credentials).
 - [x] Export Eden `App` type (`export type App = typeof app`); `/api/v1/health` checks PG + Redis.
 - [x] Contract tests: canonical WS frames + typing debounce + lean receipts (`src/tests/websocket.test.ts`, 17/17 green with local PG + Redis).

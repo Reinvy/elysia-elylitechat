@@ -28,6 +28,9 @@ model User {
     sentMessages     ChatMessage[] @relation("SenderMessages")
     receivedMessages  ChatMessage[] @relation("ReceiverMessages")
     conversations     ChatParticipant[]
+    sessions          Session[]
+    reactions         Reaction[]
+    receipts          ReadReceipt[]
 }
 
 /**
@@ -78,14 +81,23 @@ model ChatParticipant {
 
 /**
  * Represents a chat message between users
- * Supports real-time messaging with read status tracking
+ * Supports real-time messaging with read status tracking.
+ * Interop columns (clientMsgId, ciphertext, fallbackText/Meta, cta*)
+ * carry ElyChat social payloads so Lite never renders a blank card.
  */
 model ChatMessage {
-    id           String   @id @default(uuid())
-    content      String
+    id           String      @id @default(uuid())
+    content      String?
+    type         MessageType @default(TEXT)
     senderId     String
     receiverId   String
     conversationId String
+    clientMsgId  String?     @unique
+    ciphertext   String?
+    fallbackText String?
+    fallbackMeta Json?
+    ctaLabel     String?
+    ctaUrl       String?
     isRead       Boolean  @default(false)
     readAt       DateTime?
     isEdited     Boolean  @default(false)
@@ -97,12 +109,81 @@ model ChatMessage {
     sender       User         @relation("SenderMessages", fields: [senderId], references: [id], onDelete: Cascade)
     receiver     User         @relation("ReceiverMessages", fields: [receiverId], references: [id], onDelete: Cascade)
     conversation ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+    reactions    Reaction[]
+    receipts     ReadReceipt[]
 
     // Indexes for performance
     @@index([senderId])
     @@index([receiverId])
     @@index([conversationId])
+    @@index([conversationId, createdAt])
     @@index([createdAt])
     @@index([isRead])
     @@index([isDeleted])
+}
+
+enum MessageType {
+    TEXT
+    IMAGE
+    FILE
+    VOICE
+    SYSTEM
+    FEED_SHARE
+    REELS_SHARE
+    LIVE_INVITE
+    STORY_REPLY
+    BOT_CARD
+}
+
+/**
+ * Per-device session: one userId may hold parallel ElyChat + ElyLiteChat
+ * sessions distinguished by (userId, deviceId). Refresh rotation with
+ * reuse detection is enforced in auth.service (Phase 5 / Fase 5).
+ */
+model Session {
+    id               String   @id @default(uuid())
+    userId           String
+    user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+    deviceId         String
+    deviceType       String   @default("elylite")
+    accessTokenHash  String
+    refreshTokenHash String
+    ipAddress        String?
+    userAgent        String?
+    expiresAt        DateTime
+    lastUsedAt       DateTime @default(now())
+    createdAt        DateTime @default(now())
+
+    @@unique([userId, deviceId])
+    @@index([userId])
+    @@index([expiresAt])
+}
+
+/**
+ * Emoji reactions (unique per message/user/emoji for safe aggregation).
+ */
+model Reaction {
+    messageId String
+    message   ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+    userId    String
+    user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+    emoji     String
+    createdAt DateTime    @default(now())
+
+    @@id([messageId, userId, emoji])
+    @@index([messageId])
+}
+
+/**
+ * Read receipts (one row per message/user).
+ */
+model ReadReceipt {
+    messageId String
+    message   ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+    userId    String
+    user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+    readAt    DateTime    @default(now())
+
+    @@id([messageId, userId])
+    @@index([userId])
 }
