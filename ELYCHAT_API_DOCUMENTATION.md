@@ -1,12 +1,18 @@
 v# ElyChat API Documentation for Postman
 
+> **UPDATE 2026-09:** GraphQL/Apollo dihapus dari arsitektur (lihat `AGENTS.md`
+> Phase 6). Bagian `GraphQL API Endpoints` (§5) dan skema §5.x di bawah
+> **diarsipkan** — gunakan REST + Eden Treaty. Kontrak berjalan ada di root
+> `docs/technical/api_spec.md` dan event WS di `docs/technical/websocket_events.md`.
+> Jika ada konflik, root `docs/` menang.
+
 ## Table of Contents
 1. [Overview](#overview)
 2. [API Architecture](#api-architecture)
 3. [Authentication Setup](#authentication-setup)
 4. [REST API Endpoints](#rest-api-endpoints)
-5. [GraphQL API Endpoints](#graphql-api-endpoints)
-6. [WebSocket Subscriptions](#websocket-subscriptions)
+5. [GraphQL API Endpoints — REMOVED 2026-09](#graphql-api-endpoints-removed-2026-09)
+6. [WebSocket Subscriptions — see `docs/technical/websocket_events.md`](#graphql-api-endpoints-removed-2026-09)
 7. [Error Handling](#error-handling)
 8. [Pagination Examples](#pagination-examples)
 9. [Postman Setup Guide](#postman-setup-guide)
@@ -14,20 +20,20 @@ v# ElyChat API Documentation for Postman
 
 ## Overview
 
-This document provides comprehensive documentation for the ElyChat API, which is a **hybrid REST + GraphQL API** designed specifically for testing with Postman. The API provides real-time chat functionality with user authentication, conversation management, and WebSocket subscriptions.
+This document provides comprehensive documentation for the ElyChat API, which is a **REST + Eden Treaty typed API** (formerly hybrid REST + GraphQL; GraphQL removed 2026-09) designed specifically for testing with Postman. The API provides real-time chat functionality with user authentication, conversation management, and WebSocket subscriptions.
 
 ### Base URLs
 - **REST Endpoints**: 
   - Auth: `http://localhost:3000/auth`
   - Chat: `http://localhost:3000/chat`
   - Health: `http://localhost:3000/health`
-- **GraphQL Endpoint**: `http://localhost:3000/graphql`
-- **WebSocket**: `http://localhost:3000/ws`
+- **Eden Treaty**: typed RPC over the same REST routes via `treaty<App>` (replaces `http://localhost:3000/graphql`)
+- **WebSocket**: `http://localhost:3000/ws?token=<jwt>&client=elylite&v=1`
 
 ### API Features
-- **Hybrid Architecture**: Both REST and GraphQL endpoints available
+- **Typed Architecture**: REST endpoints with Eden Treaty end-to-end types (GraphQL archived)
 - **Authentication**: JWT-based authentication with access and refresh tokens
-- **Real-time Messaging**: WebSocket subscriptions for live updates
+- **Real-time Messaging**: WebSocket events over Redis `room:<id>` pub/sub for live updates
 - **Conversations**: 1-1 and group chat support
 - **Message Status**: Read/unread tracking
 - **Pagination**: Cursor-based and offset-based pagination
@@ -35,17 +41,18 @@ This document provides comprehensive documentation for the ElyChat API, which is
 
 ## API Architecture
 
-The ElyChat API implements a hybrid architecture:
+The ElyChat API implements a typed REST + WebSocket architecture
+(GraphQL removed 2026-09):
 
 ### REST Endpoints
 - **Authentication**: `/auth/*` - User registration, login, token management
 - **Chat Operations**: `/chat/*` - Conversation and message management
-- **Health Checks**: `/health` - Service status monitoring
+- **Health Checks**: `/health` - Service status monitoring (plus `/api/v1/health` with Redis check)
 
-### GraphQL Endpoints
-- **Chat Operations**: Full CRUD operations for conversations and messages
-- **Real-time Subscriptions**: Live updates for messages and read status
-- **Complex Queries**: Nested data retrieval with single requests
+### Eden Treaty Typed RPC (replaces GraphQL Endpoints)
+- **Chat Operations**: Full CRUD operations for conversations and messages with end-to-end types from `export type App`
+- **No subscriptions transport**: Live updates arrive via WebSocket events (`chat:new`, receipts), not GraphQL subscriptions
+- **Complex Queries**: Cursor pagination (`before`/`after`/`limit`) with single requests
 
 ### WebSocket Support
 - **Real-time Messaging**: Live message delivery
@@ -68,8 +75,8 @@ Create the following environment variables in Postman:
   "base_url": "http://localhost:3000",
   "rest_auth_endpoint": "http://localhost:3000/auth",
   "rest_chat_endpoint": "http://localhost:3000/chat",
-  "graphql_endpoint": "http://localhost:3000/graphql",
-  "websocket_url": "http://localhost:3000/ws",
+  "graphql_endpoint": "ARCHIVED-2026-09 (removed; use REST + Eden treaty)",
+  "websocket_url": "http://localhost:3000/ws?token=<jwt>&client=elylite&v=1",
   "jwt_token": "",
   "refresh_token": "",
   "user_id": "",
@@ -81,7 +88,7 @@ Create the following environment variables in Postman:
 1. **Register** a new user or **Login** with existing credentials using REST endpoints
 2. **Extract JWT tokens** from the response
 3. **Set environment variables** for subsequent requests
-4. **Use Bearer token** in Authorization header for both REST and GraphQL protected operations
+4. **Use Bearer token** in Authorization header for all protected REST operations
 
 ## REST API Endpoints
 
@@ -606,270 +613,13 @@ Content-Type: application/json
 }
 ```
 
-## GraphQL API Endpoints
+## GraphQL API Endpoints (REMOVED 2026-09)
 
-### GraphQL Schema Overview
-
-#### Types
-```graphql
-type User {
-  id: ID!
-  email: String!
-  username: String!
-  createdAt: String!
-  updatedAt: String!
-  isActive: Boolean!
-}
-
-type ChatMessage {
-  id: ID!
-  content: String!
-  senderId: ID!
-  receiverId: ID!
-  sender: User!
-  receiver: User!
-  createdAt: String!
-  updatedAt: String!
-  isRead: Boolean!
-}
-
-type ChatConversation {
-  id: ID!
-  participants: [User!]!
-  messages: [ChatMessage!]!
-  createdAt: String!
-  updatedAt: String!
-  lastMessage: ChatMessage
-  unreadCount: Int!
-}
-
-type PaginatedResponse {
-  items: [ChatConversation!]!
-  total: Int!
-  hasMore: Boolean!
-  cursor: String
-}
-```
-
-### GraphQL Operations
-
-#### 1. Get Conversations (GraphQL)
-**Endpoint**: `POST /graphql`
-
-**Headers**:
-```
-Authorization: Bearer {accessToken}
-Content-Type: application/json
-```
-
-**Body**:
-```json
-{
-  "query": "query GetConversations($filter: ConversationFilterInput) { getConversations(filter: $filter) { items { id participants { id username email } lastMessage { id content createdAt sender { id username } } unreadCount createdAt updatedAt } total hasMore cursor } }",
-  "variables": {
-    "filter": {
-      "limit": 20,
-      "offset": 0,
-      "participantId": "user-id-optional"
-    }
-  }
-}
-```
-
-**Response**:
-```json
-{
-  "data": {
-    "getConversations": {
-      "items": [
-        {
-          "id": "conversation-id",
-          "participants": [
-            {
-              "id": "user-id-1",
-              "username": "user1",
-              "email": "user1@example.com"
-            },
-            {
-              "id": "user-id-2",
-              "username": "user2",
-              "email": "user2@example.com"
-            }
-          ],
-          "lastMessage": {
-            "id": "message-id",
-            "content": "Hello there!",
-            "createdAt": "2024-01-01T00:00:00.000Z",
-            "sender": {
-              "id": "user-id-1",
-              "username": "user1"
-            }
-          },
-          "unreadCount": 3,
-          "createdAt": "2024-01-01T00:00:00.000Z",
-          "updatedAt": "2024-01-01T00:00:00.000Z"
-        }
-      ],
-      "total": 1,
-      "hasMore": false,
-      "cursor": null
-    }
-  }
-}
-```
-
-#### 2. Send Message (GraphQL)
-**Endpoint**: `POST /graphql`
-
-**Headers**:
-```
-Authorization: Bearer {accessToken}
-Content-Type: application/json
-```
-
-**Body**:
-```json
-{
-  "query": "mutation SendMessage($input: CreateMessageInput!) { sendMessage(input: $input) { id content createdAt isRead sender { id username email } receiver { id username email } conversation { id participants { id username } } } }",
-  "variables": {
-    "input": {
-      "content": "Hello! This is a test message.",
-      "receiverId": "receiver-user-id"
-    }
-  }
-}
-```
-
-**Response**:
-```json
-{
-  "data": {
-    "sendMessage": {
-      "id": "message-id",
-      "content": "Hello! This is a test message.",
-      "createdAt": "2024-01-01T00:00:00.000Z",
-      "isRead": true,
-      "sender": {
-        "id": "sender-user-id",
-        "username": "sender",
-        "email": "sender@example.com"
-      },
-      "receiver": {
-        "id": "receiver-user-id",
-        "username": "receiver",
-        "email": "receiver@example.com"
-      },
-      "conversation": {
-        "id": "conversation-id",
-        "participants": [
-          {
-            "id": "sender-user-id",
-            "username": "sender"
-          },
-          {
-            "id": "receiver-user-id",
-            "username": "receiver"
-          }
-        ]
-      }
-    }
-  }
-}
-```
-
-## WebSocket Subscriptions
-
-### 1. Message Added Subscription
-**Endpoint**: `ws://localhost:3000/ws`
-
-**Subscription Query**:
-```graphql
-subscription MessageAdded($conversationId: ID!) {
-  messageAdded(conversationId: $conversationId) {
-    id
-    content
-    createdAt
-    isRead
-    sender {
-      id
-      username
-      email
-    }
-    receiver {
-      id
-      username
-      email
-    }
-  }
-}
-```
-
-**Variables**:
-```json
-{
-  "conversationId": "conversation-id"
-}
-```
-
-### 2. New Message Subscription
-**Subscription Query**:
-```graphql
-subscription NewMessage {
-  newMessage {
-    id
-    content
-    createdAt
-    isRead
-    sender {
-      id
-      username
-      email
-    }
-    receiver {
-      id
-      username
-      email
-    }
-    conversation {
-      id
-      participants {
-        id
-        username
-      }
-    }
-  }
-}
-```
-
-### 3. Messages Read Subscription
-**Subscription Query**:
-```graphql
-subscription MessagesRead($conversationId: ID!) {
-  messagesRead(conversationId: $conversationId) {
-    id
-    content
-    createdAt
-    isRead
-    sender {
-      id
-      username
-      email
-    }
-    receiver {
-      id
-      username
-      email
-    }
-  }
-}
-```
-
-**Variables**:
-```json
-{
-  "conversationId": "conversation-id"
-}
-```
+> Bagian ini dihapus bersama `GRAPHQL_API_DOCUMENTATION.md` (file dihapus).
+> GraphQL/Apollo tidak lagi dipakai — gunakan REST (§4 di atas) + Eden Treaty
+> (`docs/technical/api_spec.md`). Event real-time: WS `chat:new`, `chat:delivered`,
+> `chat:read`, `chat:typing` via Redis `room:<id>`
+> (`docs/technical/websocket_events.md`).
 
 ## Error Handling
 
@@ -968,20 +718,6 @@ GET /chat/conversations?limit=20
 GET /chat/conversations?limit=20&cursor=last-cursor-id
 ```
 
-#### First Page (GraphQL)
-```json
-{
-  "query": "query GetConversations { getConversations(filter: { limit: 20 }) { items { id participants { username } lastMessage { content } } total hasMore cursor } }"
-}
-```
-
-#### Next Page (GraphQL)
-```json
-{
-  "query": "query GetConversations { getConversations(filter: { limit: 20, cursor: \"last-cursor-id\" }) { items { id participants { username } lastMessage { content } } total hasMore cursor } }"
-}
-```
-
 ### Offset-based Pagination
 
 #### First Page (REST)
@@ -994,27 +730,13 @@ GET /chat/conversations/123/messages?limit=50&offset=0
 GET /chat/conversations/123/messages?limit=50&offset=50
 ```
 
-#### First Page (GraphQL)
-```json
-{
-  "query": "query GetMessages { getMessages(filter: { conversationId: \"123\", limit: 50, offset: 0 }) { items { id content createdAt } total hasMore } }"
-}
-```
-
-#### Next Page (GraphQL)
-```json
-{
-  "query": "query GetMessages { getMessages(filter: { conversationId: \"123\", limit: 50, offset: 50 }) { items { id content createdAt } total hasMore } }"
-}
-```
-
 ## Postman Setup Guide
 
 ### 1. Create a New Collection
 1. Open Postman
 2. Click "New" → "Collection"
 3. Name it "ElyChat API"
-4. Add description: "Comprehensive testing for ElyChat hybrid REST + GraphQL API"
+4. Add description: "Comprehensive testing for ElyChat REST + Eden Treaty API (GraphQL removed 2026-09)"
 
 ### 2. Configure Environment
 1. Click the gear icon next to "No Environment"
@@ -1059,23 +781,14 @@ Create REST requests with the following structure:
 }
 ```
 
-### 5. Create GraphQL Requests
-Create GraphQL requests with the following structure:
+### 5. Typed Requests via Eden Treaty (replaces GraphQL — removed 2026-09)
+Use the same REST endpoints (§4) through the Eden typed client instead of GraphQL:
 
-#### Basic GraphQL Request Template
-```json
-{
-  "url": "{{graphql_endpoint}}",
-  "method": "POST",
-  "headers": {
-    "Authorization": "Bearer {{jwt_token}}",
-    "Content-Type": "application/json"
-  },
-  "body": {
-    "query": "query { ... }",
-    "variables": { ... }
-  }
-}
+```typescript
+import { treaty } from "@elysiajs/eden";
+import type { App } from "./src/index";
+const api = treaty<App>("http://localhost:3000");
+// typed: no hand-written query strings, no codegen
 ```
 
 ### 6. Add Pre-request Scripts
@@ -1095,9 +808,8 @@ if (jsonData.success && jsonData.data) {
 ### 7. Create Test Suites
 Organize requests into folders:
 - **Authentication**: Register, Login, Refresh, Logout
-- **REST API**: All REST endpoints
-- **GraphQL API**: All GraphQL operations
-- **WebSocket**: WebSocket subscriptions
+- **REST API**: All REST endpoints (typed via Eden Treaty)
+- **WebSocket**: WS events (`chat:new`, receipts, `chat:typing`)
 - **Error Handling**: Test error scenarios
 
 ## Testing Workflow
@@ -1107,7 +819,7 @@ Organize requests into folders:
 2. **Login** to get authentication tokens using REST endpoint
 3. **Set environment variables** with the obtained tokens
 4. **Verify** user profile endpoint works (REST)
-5. **Test** GraphQL endpoint with basic query
+5. **Verify** Eden Treaty types resolve (`treaty<App>` compiles, no `any` leaks)
 
 ### 2. REST API Testing
 1. **Test conversation endpoints**:
@@ -1123,18 +835,18 @@ Organize requests into folders:
    - Missing required fields
    - Unauthorized access
 
-### 3. GraphQL API Testing
-1. **Test complex queries**:
+### 3. Eden Treaty Testing (replaces GraphQL — removed 2026-09)
+1. **Test typed queries**:
    - Get conversations with nested data
    - Get messages with sender/receiver info
-   - Test pagination in GraphQL
-2. **Test mutations**:
-   - Send message via GraphQL
-   - Mark messages as read via GraphQL
-   - Create conversation via GraphQL
-3. **Test subscriptions**:
-   - Set up GraphQL subscriptions
-   - Verify real-time updates
+   - Test cursor pagination (`before`/`after`/`limit`)
+2. **Test typed mutations**:
+   - Send message (idempotent `clientMsgId`, dedup on retry)
+   - Mark messages as read
+   - Create conversation
+3. **Test WS events** (not subscriptions):
+   - Connect `/ws?token=<jwt>&client=elylite&v=1`
+   - Verify `chat:new` + receipt fan-out via Redis `room:<id>`
 
 ### 4. WebSocket Testing
 1. **Connect to WebSocket** endpoint
@@ -1143,23 +855,23 @@ Organize requests into folders:
 4. **Verify real-time updates** are received
 5. **Test subscription error handling**
 
-### 5. Hybrid API Testing
-1. **Test both REST and GraphQL** for same operations
-2. **Compare response formats** and performance
-3. **Test authentication flow** across both APIs
-4. **Verify data consistency** between REST and GraphQL
+### 5. REST + Eden Consistency Testing
+1. **Test REST and Eden client** for same operations
+2. **Compare response envelopes** (`{success,data,message}`) and latency
+3. **Test authentication flow** (access 15m + refresh rotation)
+4. **Verify data consistency** between REST responses and Eden types
 
 ### 6. Error Handling Testing
-1. **Test invalid tokens** in both REST and GraphQL
-2. **Test missing required fields** in both APIs
+1. **Test invalid tokens** on REST endpoints
+2. **Test missing required fields** (TypeBox 400s)
 3. **Test unauthorized access** to other users' data
 4. **Test invalid IDs and formats** in both APIs
 
 ### 7. Performance Testing
 1. **Test pagination limits** (max 100 items)
-2. **Test concurrent requests** across both APIs
+2. **Test concurrent requests** across REST + WS
 3. **Test WebSocket connections** under load
-4. **Monitor response times** for REST vs GraphQL
+4. **Monitor response times** (REST P95 <50ms, WS fan-out <30ms)
 
 ## Best Practices
 
@@ -1182,7 +894,7 @@ Organize requests into folders:
 - Validate all input fields
 - Test authentication flows thoroughly
 - Verify real-time features work correctly
-- Test both REST and GraphQL endpoints
+- Test REST endpoints and WS events
 
 ### Monitoring
 - Log all authentication attempts
@@ -1193,4 +905,4 @@ Organize requests into folders:
 
 ---
 
-This documentation provides everything needed to successfully test the ElyChat hybrid REST + GraphQL API using Postman. Follow the setup guide and testing workflow to ensure comprehensive coverage of all API features.
+This documentation provides everything needed to successfully test the ElyChat REST + Eden Treaty API using Postman. GraphQL sections were removed 2026-09 (see `AGENTS.md` Phase 6); canonical contracts live in root `docs/technical/api_spec.md` and `docs/technical/websocket_events.md`.

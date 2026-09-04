@@ -13,10 +13,27 @@ services:
       - NODE_ENV=production
       - PORT=3000
       - DATABASE_URL=postgresql://postgres:root@postgres:5432/elylitechat?schema=public
+      - REDIS_URL=redis://redis:6379
       - JWT_SECRET=elylitechat-super-secret-jwt-key
       - JWT_REFRESH_SECRET=elylitechat-super-secret-refresh-key
     depends_on:
       - postgres
+      - redis
+
+  redis:
+    image: redis:7-alpine
+    container_name: elylitechat-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
 
   postgres:
     image: postgres:15-alpine
@@ -33,3 +50,4 @@ services:
 
 volumes:
   postgres_data:
+  redis_data:

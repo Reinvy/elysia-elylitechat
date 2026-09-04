@@ -1,15 +1,18 @@
 # Chat Module
 
-This module provides comprehensive chat functionality for the ElyLiteChat application, including both REST API endpoints and GraphQL operations.
+> **UPDATE 2026-09:** GraphQL/Apollo removed — REST + Eden Treaty + WS (Redis pub/sub).
+> Canonical specs: root `docs/technical/api_spec.md`, `docs/technical/websocket_events.md`.
+
+This module provides comprehensive chat functionality for the ElyLiteChat application via REST API endpoints with Eden Treaty end-to-end types.
 
 ## Features
 
 - **REST API**: Full RESTful API for chat operations
-- **GraphQL API**: GraphQL schema and resolvers for flexible queries
-- **Real-time messaging**: Send and receive messages in real-time
+- **Eden Treaty RPC**: End-to-end typed client from `export type App` (replaces GraphQL)
+- **Real-time messaging**: Send and receive messages in real-time (WS + Redis `room:<id>`)
 - **Conversations**: Manage conversations between users
-- **Message status**: Track read/unread message status
-- **Subscriptions**: Real-time updates for new messages and read status
+- **Message status**: Track delivered/read receipts (lean payloads)
+- **Events**: `chat:new/delivered/read/typing` over WebSocket (no GraphQL subscriptions)
 - **Authentication**: JWT-based authentication for all operations
 - **Error handling**: Comprehensive error handling and validation
 
@@ -199,224 +202,34 @@ Check chat service health status.
 }
 ```
 
-## GraphQL Schema
+## Eden Treaty Typed RPC (replaces GraphQL — removed 2026-09)
 
-### Types
+> `schema.ts` / `resolvers.ts` (GraphQL/Apollo) are deprecated and pending deletion
+> (`AGENTS.md` Phase 6). All operations below are available as REST + Eden Treaty
+> typed calls via `treaty<App>` — canonical contract: root `docs/technical/api_spec.md`.
 
-#### User
-Represents a user in the chat system.
+### Queries (Eden)
 
-**Fields:**
-- `id: ID!` - Unique identifier
-- `email: String!` - User's email address
-- `username: String!` - User's username
-- `createdAt: String!` - Creation timestamp
-- `updatedAt: String!` - Last update timestamp
-- `isActive: Boolean!` - Account status
+- `conversations` — list user conversations (`GET /chat/conversations`, cursor pagination)
+- `conversation(id)` — conversation details + participants
+- `messages(conversationId, limit, before/after)` — history (`GET /chat/conversations/:id/messages`)
+- `me` — authenticated profile (`GET /auth/me`, see auth module)
 
-#### ChatMessage
-Represents a chat message between users.
+### Mutations (Eden)
 
-**Fields:**
-- `id: ID!` - Unique identifier
-- `content: String!` - Message content
-- `senderId: ID!` - ID of the message sender
-- `receiverId: ID!` - ID of the message receiver
-- `sender: User!` - Sender user object
-- `receiver: User!` - Receiver user object
-- `createdAt: String!` - Message creation timestamp
-- `updatedAt: String!` - Message update timestamp
-- `isRead: Boolean!` - Read status
+- `createConversation(participantIds, title?)` — `POST /chat/conversations`
+- `sendMessage(conversationId, content, clientMsgId)` — `POST /chat/messages`
+  (idempotent via `clientMsgId`; persist-before-publish)
+- `markAsRead(messageId)` / `markConversationAsRead(conversationId)` — receipts
 
-#### ChatConversation
-Represents a conversation between users.
+### Real-time (WebSocket, not GraphQL subscriptions)
 
-**Fields:**
-- `id: ID!` - Unique identifier
-- `participants: [User!]!` - List of conversation participants
-- `messages: [ChatMessage!]!` - List of messages in the conversation
-- `createdAt: String!` - Conversation creation timestamp
-- `updatedAt: String!` - Conversation update timestamp
-- `lastMessage: ChatMessage` - Most recent message in the conversation
-- `unreadCount: Int!` - Number of unread messages
+- `chat:new{roomId}` — new messages (Redis `room:<id>` fan-out)
+- `chat:delivered` / `chat:read` — receipts (lean `{m,r,u,t}` payloads)
+- `chat:typing` — typing indicator (3s Redis debounce)
+- `reconnect{since}` / `missed` — missed-message replay
 
-### Inputs
-
-#### CreateMessageInput
-Input for creating a new message.
-
-**Fields:**
-- `content: String!` - Message content
-- `receiverId: ID!` - ID of the message receiver
-
-#### MarkMessagesAsReadInput
-Input for marking messages as read.
-
-**Fields:**
-- `conversationId: ID!` - ID of the conversation
-- `messageIds: [ID!]!` - List of message IDs to mark as read
-
-#### ConversationFilterInput
-Input for filtering conversations.
-
-**Fields:**
-- `participantId: ID` - Filter by participant ID
-- `limit: Int` - Maximum number of results
-- `offset: Int` - Number of results to skip
-
-#### MessageFilterInput
-Input for filtering messages.
-
-**Fields:**
-- `conversationId: ID!` - ID of the conversation
-- `limit: Int` - Maximum number of results
-- `offset: Int` - Number of results to skip
-
-## Operations
-
-### Queries
-
-#### getConversations
-Get all conversations for the current user.
-
-**Arguments:**
-- `filter: ConversationFilterInput` - Optional filter parameters
-
-**Returns:** `[ChatConversation!]!`
-
-#### getConversation
-Get a specific conversation by ID.
-
-**Arguments:**
-- `id: ID!` - Conversation ID
-
-**Returns:** `ChatConversation`
-
-#### getMessages
-Get messages for a specific conversation.
-
-**Arguments:**
-- `filter: MessageFilterInput` - Filter parameters
-
-**Returns:** `[ChatMessage!]!`
-
-#### getMessage
-Get a specific message by ID.
-
-**Arguments:**
-- `id: ID!` - Message ID
-
-**Returns:** `ChatMessage`
-
-### Mutations
-
-#### sendMessage
-Send a new message to another user.
-
-**Arguments:**
-- `input: CreateMessageInput!` - Message input data
-
-**Returns:** `ChatMessage`
-
-#### markMessagesAsRead
-Mark messages as read in a conversation.
-
-**Arguments:**
-- `input: MarkMessagesAsReadInput!` - Read status input data
-
-**Returns:** `Boolean`
-
-#### createConversation
-Create a new conversation (if needed).
-
-**Arguments:**
-- `participantId: ID!` - ID of the participant
-
-**Returns:** `ChatConversation`
-
-### Subscriptions
-
-#### messageAdded
-Receive real-time messages in a specific conversation.
-
-**Arguments:**
-- `conversationId: ID!` - Conversation ID
-
-**Returns:** `ChatMessage`
-
-#### newMessage
-Receive real-time messages for all user conversations.
-
-**Returns:** `ChatMessage`
-
-#### messagesRead
-Receive updates when messages are marked as read.
-
-**Arguments:**
-- `conversationId: ID!` - Conversation ID
-
-**Returns:** `ChatMessage`
-
-## Usage Examples
-
-### Sending a Message
-
-```graphql
-mutation {
-  sendMessage(input: {
-    content: "Hello there!",
-    receiverId: "user-id-123"
-  }) {
-    id
-    content
-    sender {
-      id
-      username
-    }
-    receiver {
-      id
-      username
-    }
-    createdAt
-  }
-}
-```
-
-### Getting Conversations
-
-```graphql
-query {
-  getConversations {
-    id
-    participants {
-      id
-      username
-    }
-    lastMessage {
-      id
-      content
-      createdAt
-    }
-    unreadCount
-  }
-}
-```
-
-### Subscribing to New Messages
-
-```graphql
-subscription {
-  newMessage {
-    id
-    content
-    sender {
-      id
-      username
-    }
-    createdAt
-  }
-}
-```
+See root `docs/technical/websocket_events.md` for the canonical event table.
 
 ## Implementation Notes
 
@@ -428,7 +241,7 @@ The chat module follows a clean architecture pattern with:
 - **Service Layer**: Contains business logic and database operations ([`chat.service.ts`](./chat.service.ts))
 - **Routes**: Defines REST API endpoints ([`chat.routes.ts`](./chat.routes.ts))
 - **Module**: Provides dependency injection configuration ([`chat.module.ts`](./chat.module.ts))
-- **GraphQL**: Schema and resolvers for GraphQL operations ([`schema.ts`](./schema.ts), [`resolvers.ts`](./resolvers.ts))
+- **Typed RPC**: Eden Treaty types from the exported `App` (replaces GraphQL [`schema.ts`](./schema.ts), [`resolvers.ts`](./resolvers.ts) — deprecated, pending deletion)
 - **WebSocket**: Real-time communication support ([`websocket.ts`](./websocket.ts))
 
 ### Database Schema
@@ -458,8 +271,8 @@ The module implements comprehensive error handling with:
 
 ### Real-time Features
 
-- WebSocket support for real-time messaging
-- GraphQL subscriptions for live updates
+- WebSocket support for real-time messaging (Redis pub/sub fan-out)
+- WS events for live updates (no GraphQL subscriptions)
 - Message status tracking (read/unread)
 - Connection management for multiple users
 
