@@ -3,6 +3,8 @@
   "version": "1.0.50",
   "scripts": {
     "test": "bun test",
+    "type-check": "tsc --noEmit",
+    "lint": "rg -n \"console\\.(log|debug)\" src --glob '*.ts' --glob '!src/tests/**' && exit 1 || echo lint-ok",
     "dev": "bun run --watch src/index.ts"
   },
   "dependencies": {
@@ -26,7 +28,8 @@
   "devDependencies": {
     "@types/jsonwebtoken": "^9.0.10",
     "bun-types": "latest",
-    "prisma": "^7.0.0"
+    "prisma": "^7.0.0",
+    "typescript": "^7.0.2"
   },
   "module": "src/index.js"
 }
