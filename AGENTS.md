@@ -166,13 +166,14 @@ This checklist tracks the implementation progress of ElyLiteChat. Every AI Agent
 - [x] Redis-backed WebSocket & PubSub engine test suite (migrated from in-memory-only 2026-09).
 - [x] Lightweight Docker containerization (`Dockerfile` and `docker-compose.yml`).
 
-### Phase 6: ElyChat Unification (Eden + Redis + Interop) `[IN PROGRESS]`
+### Phase 6: ElyChat Unification (Eden + Redis + Interop) `[COMPLETED]`
 - [x] Migrate in-memory broadcast to single-node Redis pub/sub (`room:<id>`, typing 3s debounce, presence TTL 60s, fixed-window rate limit) — `src/redis.ts` + canonical frames (`chat:new/delivered/read/typing`, `message:update`).
 - [x] Remove Apollo/GraphQL code and deps (`schema.ts`, `resolvers.ts`, `@elysiajs/apollo`, `graphql`, `graphql-ws`, `ws` removed; `GRAPHQL_API_DOCUMENTATION.md` deleted).
 - [x] Add interop columns (`clientMsgId` unique, `ciphertext`, `fallbackText/Meta`, `ctaLabel/Url`, `MessageType` enum) + `Session`/`Reaction`/`ReadReceipt` + trigram/BRIN indexes — migration `20260904220000_add_interop_session_reactions` applied, 22/22 tests green.
 - [x] Tighten CORS (allowlist `CORS_ORIGINS`, no `*` with credentials).
 - [x] Export Eden `App` type (`export type App = typeof app`); `/api/v1/health` checks PG + Redis.
 - [x] Contract tests: canonical WS frames + typing debounce + lean receipts (`src/tests/websocket.test.ts`, 17/17 green with local PG + Redis).
+- [x] Fase 5 hardening: device sessions on register/login, refresh rotation + reuse-detection (chain wipe), session list/revoke endpoints, auth rate-limit (fail-open), idempotent `clientMsgId` send, `MISSING_FALLBACK` enforcement, JWT `jti` per issuance — 28/28 green.
 
 
 ---

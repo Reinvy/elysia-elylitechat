@@ -1,6 +1,11 @@
 import jwt from "jsonwebtoken";
 // import { jwt } from "@elysiajs/jwt";
+import { createHash, randomUUID } from "crypto";
 import { prisma } from "../../config/db";
+
+function sha256hex(input: string): string {
+  return createHash("sha256").update(input, "utf8").digest("hex");
+}
 
 export class AuthService {
   private readonly JWT_SECRET: string;
@@ -41,16 +46,28 @@ export class AuthService {
       cost: this.SALT_ROUNDS,
     });
 
-    // Create user
+    // Create user (pick only user columns; device fields go to Session)
     const user = await prisma.user.create({
       data: {
-        ...userData,
+        email: userData.email,
+        username: userData.username,
         password: hashedPassword,
       },
     });
 
     // Generate tokens
     const tokens = this.generateTokens(user.id, user.email);
+
+    // Track the device session (parallel ElyChat + ElyLiteChat logins coexist).
+    await this.upsertSession({
+      userId: user.id,
+      deviceId: userData.deviceId,
+      deviceType: userData.deviceType,
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+      ipAddress: userData.ipAddress,
+      userAgent: userData.userAgent,
+    });
 
     // Remove password from response
     const { password, ...userWithoutPassword } = user;
@@ -91,6 +108,17 @@ export class AuthService {
     // Generate tokens
     const tokens = this.generateTokens(user.id, user.email);
 
+    // Track the device session.
+    await this.upsertSession({
+      userId: user.id,
+      deviceId: credentials.deviceId,
+      deviceType: credentials.deviceType,
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+      ipAddress: credentials.ipAddress,
+      userAgent: credentials.userAgent,
+    });
+
     // Remove password from response
     const { password, ...userWithoutPassword } = user;
 
@@ -108,23 +136,51 @@ export class AuthService {
     }
 
     try {
-      // Verify refresh token
       const decoded = jwt.verify(
         refreshTokenData.refreshToken,
         this.JWT_REFRESH_SECRET
       ) as any;
 
-      // Check if user still exists
-      const user = await prisma.user.findUnique({
-        where: { id: decoded.userId },
+      const presentedHash = sha256hex(refreshTokenData.refreshToken);
+      const current = await prisma.session.findFirst({
+        where: { userId: decoded.userId, refreshTokenHash: presentedHash },
       });
+
+      if (!current) {
+        // Valid JWT but unknown hash: already rotated (reuse) or forged.
+        // If the user still holds sessions, treat as reuse and wipe the chain.
+        const remaining = await prisma.session.count({ where: { userId: decoded.userId } });
+        if (remaining > 0) {
+          await prisma.session.deleteMany({ where: { userId: decoded.userId } });
+          throw new Error("Refresh token reused");
+        }
+        throw new Error("Session not found");
+      }
+      if (current.expiresAt <= new Date()) {
+        await prisma.session.delete({ where: { id: current.id } });
+        throw new Error("Session expired");
+      }
+
+      const user = await prisma.user.findUnique({ where: { id: decoded.userId } });
       if (!user || !user.isActive) {
         throw new Error("User not found or inactive");
       }
 
-      // Generate new tokens
-      return this.generateTokens(user.id, user.email);
+      const tokens = this.generateTokens(user.id, user.email);
+      await prisma.session.update({
+        where: { id: current.id },
+        data: {
+          accessTokenHash: sha256hex(tokens.accessToken),
+          refreshTokenHash: sha256hex(tokens.refreshToken),
+          expiresAt: new Date(Date.now() + 7 * 86400 * 1000),
+          lastUsedAt: new Date(),
+        },
+      });
+      return tokens;
     } catch (error) {
+      if (error instanceof Error && ["Session not found", "Session expired", "Refresh token reused", "User not found or inactive"].includes(error.message)) {
+        throw error;
+      }
       throw new Error("Invalid refresh token");
     }
   }
@@ -135,12 +191,64 @@ export class AuthService {
     }
 
     try {
-      // Verify refresh token and invalidate it
       jwt.verify(refreshToken, this.JWT_REFRESH_SECRET);
-      // In a production environment, you would store invalidated tokens in a blacklist
-      // For now, we'll just validate the token format
+      await prisma.session.deleteMany({
+        where: { refreshTokenHash: sha256hex(refreshToken) },
+      });
     } catch (error) {
       throw new Error("Invalid refresh token");
+    }
+  }
+
+  async listSessions(userId: string): Promise<unknown[]> {
+    return prisma.session.findMany({
+      where: { userId },
+      select: {
+        deviceId: true,
+        deviceType: true,
+        ipAddress: true,
+        userAgent: true,
+        expiresAt: true,
+        lastUsedAt: true,
+        createdAt: true,
+      },
+      orderBy: { lastUsedAt: "desc" },
+    });
+  }
+
+  async revokeSession(userId: string, deviceId: string): Promise<boolean> {
+    const res = await prisma.session.deleteMany({ where: { userId, deviceId } });
+    return res.count > 0;
+  }
+
+  private async upsertSession(input: {
+    userId: string;
+    deviceId?: string;
+    deviceType?: string;
+    accessToken: string;
+    refreshToken: string;
+    ipAddress?: string;
+    userAgent?: string;
+  }): Promise<void> {
+    const deviceId = input.deviceId || randomUUID();
+    const existing = await prisma.session.findUnique({
+      where: { userId_deviceId: { userId: input.userId, deviceId } },
+    });
+    const data = {
+      deviceType: input.deviceType || "elylite",
+      accessTokenHash: sha256hex(input.accessToken),
+      refreshTokenHash: sha256hex(input.refreshToken),
+      ipAddress: input.ipAddress,
+      userAgent: input.userAgent,
+      expiresAt: new Date(Date.now() + 7 * 86400 * 1000),
+      lastUsedAt: new Date(),
+    };
+    if (existing) {
+      await prisma.session.update({ where: { id: existing.id }, data });
+    } else {
+      await prisma.session.create({
+        data: { userId: input.userId, deviceId, ...data },
+      });
     }
   }
 
@@ -199,11 +307,13 @@ export class AuthService {
     userId: string,
     email: string
   ): { accessToken: string; refreshToken: string } {
-    const accessToken = jwt.sign({ userId, email }, this.JWT_SECRET, {
+    // jti guarantees every issuance differs (rotation must change the token
+    // even within the same second).
+    const accessToken = jwt.sign({ userId, email, jti: randomUUID() }, this.JWT_SECRET, {
       expiresIn: this.ACCESS_TOKEN_EXPIRES_IN,
     });
 
-    const refreshToken = jwt.sign({ userId, email }, this.JWT_REFRESH_SECRET, {
+    const refreshToken = jwt.sign({ userId, email, jti: randomUUID() }, this.JWT_REFRESH_SECRET, {
       expiresIn: this.REFRESH_TOKEN_EXPIRES_IN,
     });
 

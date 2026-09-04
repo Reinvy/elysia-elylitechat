@@ -1,9 +1,28 @@
 import { authService } from "./auth.service";
+import { checkRateLimit } from "../../redis.js";
+
+function clientIp(headers: Record<string, string | undefined>): string {
+  const fwd = headers["x-forwarded-for"];
+  if (fwd) return (fwd.split(",")[0] ?? "unknown").trim();
+  return headers["x-real-ip"] ?? "unknown";
+}
+
+async function authLimit(ip: string, scope: string): Promise<string | null> {
+  try {
+    const res = await checkRateLimit(`rl:auth:${scope}:${ip}`, 30, 60);
+    if (!res.allowed) return `retry in ${res.resetSec}s`;
+    return null;
+  } catch {
+    return null; // fail-open; rotation/reuse guards still apply
+  }
+}
 
 export class AuthController {
   // Register business logic
-  async register({ body }: { body: any }) {
+  async register({ body, headers }: { body: any; headers: Record<string, string | undefined> }) {
     try {
+      const limited = await authLimit(clientIp(headers), "register");
+      if (limited) throw new Error(`Rate limited (${limited})`);
       const result = await authService.register(body);
       return {
         success: true,
@@ -20,8 +39,10 @@ export class AuthController {
   }
 
   // Login business logic
-  async login({ body, set }: { body: any; set: any }) {
+  async login({ body, headers, set }: { body: any; headers: Record<string, string | undefined>; set: any }) {
     try {
+      const limited = await authLimit(clientIp(headers), "login");
+      if (limited) throw new Error(`Rate limited (${limited})`);
       const result = await authService.login(body);
       set.status = 200;
       return {
@@ -133,6 +154,44 @@ export class AuthController {
         success: false,
         message:
           error instanceof Error ? error.message : "Failed to retrieve profile",
+        data: null,
+      };
+    }
+  }
+
+  // List device sessions for the authenticated user
+  async listSessions({ headers }: { headers: Record<string, string | undefined> }) {
+    try {
+      const authHeader = headers["authorization"];
+      if (!authHeader || !authHeader.startsWith("Bearer ")) {
+        throw new Error("Authorization token required");
+      }
+      const decoded = authService.verifyAccessToken(authHeader.substring(7));
+      const sessions = await authService.listSessions(decoded.userId);
+      return { success: true, message: "Sessions retrieved successfully", data: sessions };
+    } catch (error) {
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : "Failed to list sessions",
+        data: null,
+      };
+    }
+  }
+
+  // Revoke one device session
+  async revokeSession({ headers, params }: { headers: Record<string, string | undefined>; params: { deviceId: string } }) {
+    try {
+      const authHeader = headers["authorization"];
+      if (!authHeader || !authHeader.startsWith("Bearer ")) {
+        throw new Error("Authorization token required");
+      }
+      const decoded = authService.verifyAccessToken(authHeader.substring(7));
+      const revoked = await authService.revokeSession(decoded.userId, params.deviceId);
+      return { success: true, message: revoked ? "Session revoked" : "Session not found", data: { revoked } };
+    } catch (error) {
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : "Failed to revoke session",
         data: null,
       };
     }

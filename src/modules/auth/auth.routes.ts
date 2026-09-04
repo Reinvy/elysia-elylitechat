@@ -17,6 +17,8 @@ export const authRoute = new Elysia().group("/auth", (app) =>
           minLength: 3,
           description: "Username (at least 3 characters)",
         }),
+        deviceId: t.Optional(t.String({ description: "Device id for parallel sessions" })),
+        deviceType: t.Optional(t.String({ description: "'elylite' | 'elychat'" })),
       }),
       detail: {
         summary: "Register a new user",
@@ -34,6 +36,8 @@ export const authRoute = new Elysia().group("/auth", (app) =>
           minLength: 8,
           description: "User password (at least 8 characters)",
         }),
+        deviceId: t.Optional(t.String()),
+        deviceType: t.Optional(t.String()),
       }),
       detail: {
         summary: "Sign in the user",
@@ -55,6 +59,27 @@ export const authRoute = new Elysia().group("/auth", (app) =>
       }),
       detail: {
         summary: "Refresh access token",
+        tags: ["authentication"],
+      },
+    })
+    .get("/sessions", authController.listSessions, {
+      headers: t.Object({
+        authorization: t.String(),
+      }),
+      detail: {
+        summary: "List active device sessions",
+        tags: ["authentication"],
+      },
+    })
+    .delete("/sessions/:deviceId", authController.revokeSession, {
+      headers: t.Object({
+        authorization: t.String(),
+      }),
+      params: t.Object({
+        deviceId: t.String(),
+      }),
+      detail: {
+        summary: "Revoke one device session",
         tags: ["authentication"],
       },
     })

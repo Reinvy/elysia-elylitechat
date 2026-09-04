@@ -1,4 +1,7 @@
 import { prisma } from "../../config/db";
+import { claimDedupe } from "../../redis.js";
+
+const SOCIAL_TYPES = new Set(["feed_share", "reels_share", "live_invite"]);
 
 // Custom error classes for better error handling
 export class ChatError extends Error {
@@ -30,9 +33,16 @@ export class NotFoundError extends ChatError {
 }
 
 export interface CreateMessageInput {
-  content: string;
+  content?: string;
+  type?: string;
   receiverId: string;
   conversationId?: string;
+  clientMsgId?: string;
+  ciphertext?: string;
+  fallback_text?: string;
+  fallback_metadata?: Record<string, unknown>;
+  ctaLabel?: string;
+  ctaUrl?: string;
 }
 
 export interface MarkMessagesAsReadInput {
@@ -440,7 +450,7 @@ export class ChatService {
     }
   }
 
-  // Send a new message
+  // Send a new message (idempotent on clientMsgId; E2EE ciphertext-only allowed)
   async sendMessage(userId: string, input: CreateMessageInput): Promise<any> {
     const { content, receiverId, conversationId } = input;
 
@@ -449,16 +459,39 @@ export class ChatService {
       throw new ValidationError('User ID is required and must be a string');
     }
 
-    if (!content?.trim()) {
-      throw new ValidationError('Message content is required and cannot be empty');
+    const text = content?.trim() ?? '';
+    if (!text && !input.ciphertext) {
+      throw new ValidationError('Message content or ciphertext is required');
     }
 
-    if (content.trim().length > 2000) {
-      throw new ValidationError('Message content cannot exceed 2000 characters');
+    if (text.length > 10000) {
+      throw new ValidationError('Message content cannot exceed 10000 characters');
+    }
+
+    const wireType = (input.type || "text").toLowerCase();
+    const messageType = wireType.toUpperCase() as
+      | "TEXT" | "IMAGE" | "FILE" | "VOICE" | "SYSTEM"
+      | "FEED_SHARE" | "REELS_SHARE" | "LIVE_INVITE" | "STORY_REPLY" | "BOT_CARD";
+    if (!["TEXT","IMAGE","FILE","VOICE","SYSTEM","FEED_SHARE","REELS_SHARE","LIVE_INVITE","STORY_REPLY","BOT_CARD"].includes(messageType)) {
+      throw new ValidationError(`Unknown message type: ${input.type}`);
+    }
+    if (SOCIAL_TYPES.has(wireType) && !input.fallback_text?.trim()) {
+      const err = new ValidationError(`fallback_text is required for ${input.type}`);
+      (err as { code?: string }).code = 'MISSING_FALLBACK';
+      throw err;
     }
 
     if (!receiverId || typeof receiverId !== 'string') {
       throw new ValidationError('Receiver ID is required and must be a string');
+    }
+
+    // Idempotent replay: same clientMsgId returns the original row.
+    if (input.clientMsgId) {
+      const existing = await prisma.chatMessage.findUnique({
+        where: { clientMsgId: input.clientMsgId },
+      });
+      if (existing) return existing;
+      await claimDedupe(input.clientMsgId).catch(() => false);
     }
 
     if (conversationId && typeof conversationId !== 'string') {
@@ -544,10 +577,17 @@ export class ChatService {
       // Create the message
       const message = await prisma.chatMessage.create({
         data: {
-          content: content.trim(),
+          ...(text ? { content: text } : {}),
+          type: messageType,
           senderId: userId,
           receiverId,
-          conversationId: targetConversationId
+          conversationId: targetConversationId,
+          ...(input.clientMsgId ? { clientMsgId: input.clientMsgId } : {}),
+          ...(input.ciphertext ? { ciphertext: input.ciphertext } : {}),
+          ...(input.fallback_text ? { fallbackText: input.fallback_text } : {}),
+          ...(input.fallback_metadata ? { fallbackMeta: JSON.parse(JSON.stringify(input.fallback_metadata)) } : {}),
+          ...(input.ctaLabel ? { ctaLabel: input.ctaLabel } : {}),
+          ...(input.ctaUrl ? { ctaUrl: input.ctaUrl } : {}),
         },
         include: {
           sender: {

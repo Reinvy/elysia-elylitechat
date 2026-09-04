@@ -67,19 +67,26 @@ export const chatRoute = new Elysia().group("/chat", (app) =>
       },
     })
     
-    // Send a new message
+    // Send a new message (idempotent via clientMsgId; social types need fallback_text)
     .post("/messages", chatController.sendMessage, {
       body: t.Object({
-        content: t.String({
-          minLength: 1,
-          description: "Message content (minimum 1 character)",
-        }),
+        content: t.Optional(t.String({
+          maxLength: 10000,
+          description: "Message content (or ciphertext for E2EE)",
+        })),
+        type: t.Optional(t.String({ description: "text|image|file|voice|feed_share|reels_share|live_invite" })),
         receiverId: t.String({
           description: "ID of the message receiver",
         }),
         conversationId: t.Optional(t.String({
           description: "Optional conversation ID (if not provided, will be created)",
         })),
+        clientMsgId: t.Optional(t.String({ description: "Idempotency key (UUID)" })),
+        ciphertext: t.Optional(t.String({ description: "E2EE ciphertext (content stays empty)" })),
+        fallback_text: t.Optional(t.String({ maxLength: 2000 })),
+        fallback_metadata: t.Optional(t.Record(t.String(), t.Unknown())),
+        ctaLabel: t.Optional(t.String({ maxLength: 100 })),
+        ctaUrl: t.Optional(t.String({ maxLength: 2000 })),
       }),
       headers: t.Object({
         authorization: t.String(),
@@ -193,4 +200,4 @@ export const chatRoute = new Elysia().group("/chat", (app) =>
         tags: ["chat"],
       },
     })
-);
+);
