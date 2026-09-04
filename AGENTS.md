@@ -167,11 +167,12 @@ This checklist tracks the implementation progress of ElyLiteChat. Every AI Agent
 - [x] Lightweight Docker containerization (`Dockerfile` and `docker-compose.yml`).
 
 ### Phase 6: ElyChat Unification (Eden + Redis + Interop) `[IN PROGRESS]`
-- [ ] Migrate remaining in-memory broadcast paths to single-node Redis pub/sub (`room:<id>`, typing 3s, presence TTL).
-- [ ] Remove all Apollo/GraphQL dependencies from `package.json` and docs; verify `bun install` + `bun test` green.
-- [ ] Add interop columns (`clientMsgId`, `ciphertext`, `fallbackText/Meta`, `ctaLabel/Url`) per `docs/technical/data_models.md`.
-- [ ] Tighten CORS (no `*` with credentials in prod) and add `X-Client-Hint: lite` handling.
-- [ ] Contract tests: every `feed_share`/`reels_share`/`live_invite` carries `fallback_text`; idempotent `clientMsgId` dedup.
+- [x] Migrate in-memory broadcast to single-node Redis pub/sub (`room:<id>`, typing 3s debounce, presence TTL 60s, fixed-window rate limit) — `src/redis.ts` + canonical frames (`chat:new/delivered/read/typing`, `message:update`).
+- [x] Remove Apollo/GraphQL code and deps (`schema.ts`, `resolvers.ts`, `@elysiajs/apollo`, `graphql`, `graphql-ws`, `ws` removed; `GRAPHQL_API_DOCUMENTATION.md` deleted).
+- [ ] Add interop columns (`clientMsgId`, `ciphertext`, `fallbackText/Meta`, `ctaLabel/Url`) per `docs/technical/data_models.md` → **Phase 2 (Fase 2)**.
+- [x] Tighten CORS (allowlist `CORS_ORIGINS`, no `*` with credentials).
+- [x] Export Eden `App` type (`export type App = typeof app`); `/api/v1/health` checks PG + Redis.
+- [x] Contract tests: canonical WS frames + typing debounce + lean receipts (`src/tests/websocket.test.ts`, 17/17 green with local PG + Redis).
 
 
 ---

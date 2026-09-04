@@ -4,7 +4,6 @@ export class AuthController {
   // Register business logic
   async register({ body }: { body: any }) {
     try {
-      console.log("Register request body:", body);
       const result = await authService.register(body);
       return {
         success: true,
@@ -12,7 +11,6 @@ export class AuthController {
         data: result,
       };
     } catch (error) {
-      console.error("Registration error:", error);
       return {
         success: false,
         message: error instanceof Error ? error.message : "Registration failed",
@@ -82,7 +80,7 @@ export class AuthController {
     headers,
     body,
   }: {
-    headers: { authorization: string };
+    headers: Record<string, string | undefined>;
     body: { currentPassword: string; newPassword: string };
   }) {
     try {
@@ -118,7 +116,6 @@ export class AuthController {
   async getProfile(ctx: any) {
     try {
       const authHeader = ctx.headers.authorization;
-      console.log(authHeader);
       if (!authHeader || !authHeader.startsWith("Bearer ")) {
         throw new Error("Authorization token required");
       }

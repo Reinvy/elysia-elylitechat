@@ -204,8 +204,8 @@ Check chat service health status.
 
 ## Eden Treaty Typed RPC (replaces GraphQL — removed 2026-09)
 
-> `schema.ts` / `resolvers.ts` (GraphQL/Apollo) are deprecated and pending deletion
-> (`AGENTS.md` Phase 6). All operations below are available as REST + Eden Treaty
+> `schema.ts` / `resolvers.ts` (GraphQL/Apollo) were deleted in Phase 1.
+> All operations below are available as REST + Eden Treaty
 > typed calls via `treaty<App>` — canonical contract: root `docs/technical/api_spec.md`.
 
 ### Queries (Eden)
@@ -241,7 +241,7 @@ The chat module follows a clean architecture pattern with:
 - **Service Layer**: Contains business logic and database operations ([`chat.service.ts`](./chat.service.ts))
 - **Routes**: Defines REST API endpoints ([`chat.routes.ts`](./chat.routes.ts))
 - **Module**: Provides dependency injection configuration ([`chat.module.ts`](./chat.module.ts))
-- **Typed RPC**: Eden Treaty types from the exported `App` (replaces GraphQL [`schema.ts`](./schema.ts), [`resolvers.ts`](./resolvers.ts) — deprecated, pending deletion)
+- **Typed RPC**: Eden Treaty types from the exported `App` (GraphQL `schema.ts`/`resolvers.ts` deleted Phase 1)
 - **WebSocket**: Real-time communication support ([`websocket.ts`](./websocket.ts))
 
 ### Database Schema

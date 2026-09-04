@@ -214,7 +214,6 @@ export class AuthService {
   verifyAccessToken(token: string): { userId: string; email: string } {
     try {
       const decoded = jwt.verify(token, this.JWT_SECRET) as any;
-      console.log("Decoded token:", decoded);
       return { userId: decoded.userId, email: decoded.email };
     } catch (error) {
       throw new Error("Invalid access token");

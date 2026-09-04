@@ -47,7 +47,6 @@ export class ChatModule {
    * Initialize the chat module
    */
   initialize(): Elysia {
-    console.log("Initializing Chat Module...");
     
     // Validate required dependencies
     if (!this.service) {

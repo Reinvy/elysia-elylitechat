@@ -4,29 +4,43 @@ import {
   connectionManager,
   broadcastTypingEvent,
   broadcastNewMessage,
+  ensureBus,
 } from "../modules/chat/websocket.js";
+import { disconnectRedis, roomChannel } from "../redis.js";
 
-describe("ElyLiteChat - WebSocket & PubSub Engine", () => {
+describe("ElyLiteChat - WebSocket & Redis PubSub Engine", () => {
   const dummyUser = {
     id: "user_test_ws_1",
     email: "ws1@example.com",
     username: "ws1",
   };
 
-  it("should subscribe and receive events from PubSub", async () => {
+  beforeAll(async () => {
+    await ensureBus();
+  });
+
+  afterAll(async () => {
+    connectionManager.cleanup();
+    await disconnectRedis();
+  });
+
+  it("should subscribe and receive events over Redis pub/sub", async () => {
     let receivedData: any = null;
-    const topic = "TEST_TOPIC";
+    const topic = roomChannel("test-topic-ws");
 
     const unsubscribe = pubSub.subscribe(topic, (data) => {
       receivedData = data;
     });
 
-    pubSub.publish(topic, { message: "Hello PubSub" });
-    expect(receivedData).toEqual({ message: "Hello PubSub" });
+    await pubSub.publish(topic, { t: "ping-test", hello: "redis" });
+    // allow the subscriber loop to dispatch
+    await new Promise((r) => setTimeout(r, 150));
+    expect(receivedData).toEqual({ t: "ping-test", hello: "redis" });
 
     unsubscribe();
     receivedData = null;
-    pubSub.publish(topic, { message: "Should not receive" });
+    await pubSub.publish(topic, { t: "should-not-receive" });
+    await new Promise((r) => setTimeout(r, 150));
     expect(receivedData).toBeNull();
   });
 
@@ -50,18 +64,54 @@ describe("ElyLiteChat - WebSocket & PubSub Engine", () => {
     expect(connectionManager.getConnection("conn_123")).toBeUndefined();
   });
 
-  it("should stream typing events over PubSub", async () => {
-    let receivedTyping: any = null;
+  it("should stream canonical typing events with 3s debounce", async () => {
     const convId = "conv_typing_test";
+    let receivedTyping: any = null;
 
-    const unsubscribe = pubSub.subscribe(`TYPING_STATUS:${convId}`, (data) => {
+    const unsubscribe = pubSub.subscribe(roomChannel(convId), (data) => {
       receivedTyping = data;
     });
 
-    await broadcastTypingEvent(convId, dummyUser, true);
+    const first = await broadcastTypingEvent(convId, dummyUser, true);
+    expect(first).toBe(true);
+    await new Promise((r) => setTimeout(r, 150));
     expect(receivedTyping).toBeDefined();
-    expect(receivedTyping.typingStatus.isTyping).toBe(true);
-    expect(receivedTyping.typingStatus.userId).toBe(dummyUser.id);
+    expect(receivedTyping.t).toBe("chat:typing");
+    expect(receivedTyping.on).toBe(true);
+    expect(receivedTyping.u).toBe(dummyUser.id);
+
+    // second claim inside the window is debounced (not published)
+    const second = await broadcastTypingEvent(convId, dummyUser, true);
+    expect(second).toBe(false);
+
+    await broadcastTypingEvent(convId, dummyUser, false);
+    await new Promise((r) => setTimeout(r, 150));
+    expect(receivedTyping.on).toBe(false);
+
+    unsubscribe();
+  });
+
+  it("should publish lean chat:new frames", async () => {
+    const convId = "conv_newmsg_test";
+    let received: any = null;
+    const unsubscribe = pubSub.subscribe(roomChannel(convId), (data) => {
+      received = data;
+    });
+
+    await broadcastNewMessage({
+      id: "msg_1",
+      conversationId: convId,
+      senderId: dummyUser.id,
+      content: "hello lean world",
+    });
+    await new Promise((r) => setTimeout(r, 150));
+
+    expect(received).toBeDefined();
+    expect(received.t).toBe("chat:new");
+    expect(received.m).toBe("msg_1");
+    expect(received.r).toBe(convId);
+    expect(received.u).toBe(dummyUser.id);
+    expect(received.c).toBe("hello lean world");
 
     unsubscribe();
   });

@@ -3,7 +3,7 @@ import { app } from "../index.js";
 import { prisma } from "../config/db.js";
 import { authService } from "../modules/auth/auth.service.js";
 
-describe("ElyLiteChat - Chat REST & GraphQL Module", () => {
+describe("ElyLiteChat - Chat REST + Eden Module", () => {
   let user1: any;
   let user2: any;
   let token1 = "";

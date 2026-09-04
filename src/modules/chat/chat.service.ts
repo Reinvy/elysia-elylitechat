@@ -218,7 +218,6 @@ export class ChatService {
         cursor: newCursor
       };
     } catch (error) {
-      console.error('Error fetching conversations:', error);
       if (error instanceof ChatError) {
         throw error;
       }
@@ -273,7 +272,6 @@ export class ChatService {
 
       return conversation;
     } catch (error) {
-      console.error('Error fetching conversation:', error);
       if (error instanceof ChatError) {
         throw error;
       }
@@ -377,7 +375,6 @@ export class ChatService {
         cursor: newCursor
       };
     } catch (error) {
-      console.error('Error fetching messages:', error);
       if (error instanceof ChatError) {
         throw error;
       }
@@ -436,7 +433,6 @@ export class ChatService {
 
       return message;
     } catch (error) {
-      console.error('Error fetching message:', error);
       if (error instanceof ChatError) {
         throw error;
       }
@@ -572,7 +568,6 @@ export class ChatService {
 
       return message;
     } catch (error) {
-      console.error('Error sending message:', error);
       if (error instanceof ChatError) {
         throw error;
       }
@@ -613,7 +608,6 @@ export class ChatService {
 
       return result.count > 0;
     } catch (error) {
-      console.error('Error marking messages as read:', error);
       if (error instanceof ChatError) {
         throw error;
       }
@@ -689,7 +683,6 @@ export class ChatService {
 
       return conversation;
     } catch (error) {
-      console.error('Error creating conversation:', error);
       if (error instanceof ChatError) {
         throw error;
       }

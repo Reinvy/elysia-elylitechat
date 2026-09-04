@@ -1,19 +1,48 @@
 import { Elysia } from "elysia";
 import { openapi } from "@elysiajs/openapi";
-import { apollo } from "@elysiajs/apollo";
 
 import { authRoute } from "./modules/auth/auth.routes.js";
 import { rootRoute } from "./root.js";
 import { chatRoute } from "./modules/chat/chat.routes.js";
-import { chatTypeDefs } from "./modules/chat/schema.js";
-import { chatResolvers } from "./modules/chat/resolvers.js";
 import {
   connectionManager,
+  relayRoom,
+  ensureBus,
+  assertParticipant,
   broadcastTypingEvent,
 } from "./modules/chat/websocket.js";
 import { authService } from "./modules/auth/auth.service.js";
 import { chatService } from "./modules/chat/chat.service.js";
 import { prisma } from "./config/db.js";
+import { connectRedis, pingRedis, redisLastError } from "./redis.js";
+
+const CORS_ORIGINS = (process.env.CORS_ORIGINS || "http://localhost:3000,http://localhost:3002")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+function corsFor(origin: string | null): Record<string, string> {
+  if (origin && CORS_ORIGINS.includes(origin)) {
+    return {
+      "Access-Control-Allow-Origin": origin,
+      "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization",
+      "Access-Control-Allow-Credentials": "true",
+    };
+  }
+  return {};
+}
+
+
+interface WsMeta {
+  userId?: string;
+  user?: unknown;
+  relays?: Array<() => void>;
+}
+
+function wsMeta(ws: { data: unknown }): WsMeta {
+  return ws.data as WsMeta;
+}
 
 export const app = new Elysia()
   .use(
@@ -21,8 +50,8 @@ export const app = new Elysia()
       documentation: {
         info: {
           title: "ElyLiteChat API",
-          version: "1.0.0",
-          description: "Lightweight, hybrid REST & GraphQL real-time chat backend",
+          version: "2.0.0",
+          description: "Lightweight REST + Eden Treaty real-time chat backend (GraphQL removed)",
           contact: {
             name: "ElyChat Support",
             email: "support@elychat.com",
@@ -47,178 +76,195 @@ export const app = new Elysia()
   )
   .onRequest(({ set, request }) => {
     const origin = request.headers.get("origin");
-    if (origin) {
-      set.headers = {
-        ...set.headers,
-        "Access-Control-Allow-Origin": origin,
-        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization",
-        "Access-Control-Allow-Credentials": "true",
-      } as any;
+    const headers = corsFor(origin);
+    if (Object.keys(headers).length > 0) {
+      set.headers = { ...set.headers, ...headers } as typeof set.headers;
     }
   })
-  .options("/*", ({ set }) => {
+  .options("/*", ({ set, request }) => {
     set.status = 204;
-    set.headers = {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type, Authorization",
-      "Access-Control-Allow-Credentials": "true",
-    } as any;
+    const headers = corsFor(request.headers.get("origin"));
+    set.headers = { ...set.headers, ...headers } as typeof set.headers;
   })
-  .use(
-    apollo({
-      typeDefs: chatTypeDefs,
-      resolvers: chatResolvers,
-      context: async ({ request }) => {
-        const authorization = request.headers.get("Authorization");
-        if (!authorization || !authorization.startsWith("Bearer ")) {
-          return { user: null };
-        }
-
-        const token = authorization.substring(7);
-        try {
-          const decoded = authService.verifyAccessToken(token);
-          const user = await prisma.user.findUnique({
-            where: { id: decoded.userId },
-            select: {
-              id: true,
-              email: true,
-              username: true,
-              isActive: true,
-            },
-          });
-          return { user };
-        } catch {
-          return { user: null };
-        }
-      },
-    })
-  )
+  .get("/api/v1/health", async ({ set }) => {
+    try {
+      await prisma.$queryRaw`SELECT 1`;
+      await pingRedis();
+      return {
+        success: true as const,
+        data: { postgres: "ok", redis: "ok", version: "2.0.0" },
+      };
+    } catch (err) {
+      set.status = 503;
+      return {
+        success: false as const,
+        error: {
+          code: "UNHEALTHY",
+          message: err instanceof Error ? err.message : "dependency check failed",
+          redisLastError: redisLastError(),
+        },
+      };
+    }
+  })
   .use(rootRoute)
   .use(authRoute)
   .use(chatRoute)
   .ws("/ws", {
-    open(ws) {
+    async open(ws) {
       const url = new URL(ws.data.request.url);
-      const token = url.searchParams.get("token") || ws.data.request.headers.get("sec-websocket-protocol");
+      const token =
+        url.searchParams.get("token") ||
+        ws.data.request.headers.get("sec-websocket-protocol") ||
+        "";
 
       if (!token) {
-        ws.send(JSON.stringify({ type: "ERROR", message: "Authentication required (token parameter)" }));
+        ws.send(JSON.stringify({ t: "error", code: "UNAUTHORIZED", message: "token required (?token= or sec-websocket-protocol)" }));
         ws.close();
         return;
       }
 
       try {
         const decoded = authService.verifyAccessToken(token);
-        (ws.data as any).userId = decoded.userId;
-        (ws.data as any).user = decoded;
-        (ws.data as any).connId = ws.id;
-
-        connectionManager.addConnection(ws.id, ws, {
-          id: decoded.userId,
-          email: decoded.email,
-          username: decoded.email.split("@")[0],
+        const user = await prisma.user.findUnique({
+          where: { id: decoded.userId },
+          select: { id: true, email: true, username: true, isActive: true },
         });
+        if (!user || !user.isActive) throw new Error("unknown or inactive user");
+
+        wsMeta(ws).userId = user.id;
+        wsMeta(ws).user = decoded;
+        wsMeta(ws).relays = [];
+
+        connectionManager.addConnection(
+          ws.id,
+          ws,
+          { id: user.id, email: user.email, username: user.username }
+        );
+
+        // Subscribe this process to every room the user belongs to.
+        const memberships = await prisma.chatParticipant.findMany({
+          where: { userId: user.id, isActive: true },
+          select: { conversationId: true },
+        });
+        const relays = wsMeta(ws).relays ?? [];
+        for (const m of memberships) {
+          connectionManager.joinConversation(ws.id, m.conversationId);
+          relays.push(relayRoom(m.conversationId));
+        }
 
         ws.send(JSON.stringify({
-          type: "AUTH_SUCCESS",
-          user: decoded,
-          timestamp: new Date().toISOString(),
+          t: "ready",
+          v: 1,
+          client: "elylite",
+          rooms: memberships.map((m) => m.conversationId),
         }));
-      } catch (err) {
-        ws.send(JSON.stringify({ type: "ERROR", message: "Invalid or expired token" }));
+
+        // Optional catch-up: ?since=<iso>
+        const since = url.searchParams.get("since");
+        if (since) {
+          const missed = await chatService.getMissedMessages(user.id, new Date(since));
+          ws.send(JSON.stringify({ t: "missed", messages: missed.slice(0, 100) }));
+        }
+      } catch {
+        ws.send(JSON.stringify({ t: "error", code: "UNAUTHORIZED", message: "invalid or expired token" }));
         ws.close();
       }
     },
 
-    async message(ws, message: any) {
+    async message(ws, message: unknown) {
+      const data = wsMeta(ws);
       try {
-        const parsed = typeof message === "string" ? JSON.parse(message) : message;
-        const user = (ws.data as any).user;
-        const connId = ws.id;
+        const parsed = (
+          typeof message === "string" ? JSON.parse(message) : message
+        ) as { t?: string; [k: string]: unknown };
+        const userId = data.userId;
 
-        if (parsed.type === "PONG") {
-          connectionManager.recordPong(connId);
+        if (parsed.t === "ping") {
+          connectionManager.recordPong(ws.id);
+          ws.send(JSON.stringify({ t: "pong", tms: Date.now() }));
           return;
         }
 
-        if (!user) {
-          ws.send(JSON.stringify({ type: "ERROR", message: "Unauthorized socket" }));
+        if (!userId) {
+          ws.send(JSON.stringify({ t: "error", code: "UNAUTHORIZED", message: "authenticate first" }));
           return;
         }
 
-        switch (parsed.type) {
-          case "JOIN_ROOM":
-            if (parsed.conversationId) {
-              connectionManager.joinConversation(connId, parsed.conversationId);
-              ws.send(JSON.stringify({
-                type: "ROOM_JOINED",
-                conversationId: parsed.conversationId,
-              }));
+        switch (parsed.t) {
+          case "join": {
+            const roomId = String(parsed.roomId || "");
+            if (!roomId) break;
+            await assertParticipant(roomId, userId);
+            connectionManager.joinConversation(ws.id, roomId);
+            const relays = wsMeta(ws).relays;
+            const unsub = relayRoom(roomId);
+            if (relays) relays.push(unsub);
+            ws.send(JSON.stringify({ t: "room_joined", r: roomId }));
+            break;
+          }
+          case "leave": {
+            const roomId = String(parsed.roomId || "");
+            if (roomId) connectionManager.leaveConversation(ws.id, roomId);
+            ws.send(JSON.stringify({ t: "room_left", r: roomId }));
+            break;
+          }
+          case "typing": {
+            const roomId = String(parsed.roomId || "");
+            const on = parsed.on !== false;
+            if (!roomId) break;
+            await assertParticipant(roomId, userId);
+            await broadcastTypingEvent(roomId, {
+              id: userId,
+              email: "",
+              username: "",
+            }, on);
+            break;
+          }
+          case "reconnect": {
+            const since = parsed.since ? new Date(String(parsed.since)) : null;
+            if (since && !Number.isNaN(since.getTime())) {
+              const missed = await chatService.getMissedMessages(userId, since);
+              ws.send(JSON.stringify({ t: "missed", messages: missed.slice(0, 100) }));
             }
             break;
-
-          case "LEAVE_ROOM":
-            if (parsed.conversationId) {
-              connectionManager.leaveConversation(connId, parsed.conversationId);
-              ws.send(JSON.stringify({
-                type: "ROOM_LEFT",
-                conversationId: parsed.conversationId,
-              }));
-            }
-            break;
-
-          case "TYPING_START":
-            if (parsed.conversationId) {
-              await broadcastTypingEvent(parsed.conversationId, {
-                id: user.userId,
-                email: user.email,
-                username: user.email.split("@")[0],
-              }, true);
-            }
-            break;
-
-          case "TYPING_STOP":
-            if (parsed.conversationId) {
-              await broadcastTypingEvent(parsed.conversationId, {
-                id: user.userId,
-                email: user.email,
-                username: user.email.split("@")[0],
-              }, false);
-            }
-            break;
-
-          case "RECONNECT":
-            if (parsed.since) {
-              const missed = await chatService.getMissedMessages(user.userId, new Date(parsed.since));
-              ws.send(JSON.stringify({
-                type: "MISSED_MESSAGES",
-                messages: missed,
-              }));
-            }
-            break;
-
-          case "PING":
-            ws.send(JSON.stringify({ type: "PONG", timestamp: Date.now() }));
-            break;
-
+          }
           default:
-            ws.send(JSON.stringify({ type: "ACK", message: "Received" }));
+            ws.send(JSON.stringify({ t: "error", code: "VALIDATION_ERROR", message: `unknown event: ${String(parsed.t)}` }));
             break;
         }
-      } catch (err) {
-        console.error("[WS] Error handling message:", err);
+      } catch {
+        ws.send(JSON.stringify({ t: "error", code: "VALIDATION_ERROR", message: "malformed frame" }));
       }
     },
 
     close(ws) {
+      const relays = wsMeta(ws).relays;
+      if (relays) relays.forEach((unsub) => {
+        try {
+          unsub();
+        } catch {
+          // already gone
+        }
+      });
       connectionManager.removeConnection(ws.id);
     },
   });
 
-const port = process.env.PORT || 3000;
+// Eden Treaty contract: Next.js clients consume `treaty<App>`.
+export type App = typeof app;
+
+const port = Number(process.env.PORT || 3001);
 if (process.env.NODE_ENV !== "test") {
+  await ensureBus().catch((err) => {
+    process.stderr.write(`[boot] redis unavailable: ${err instanceof Error ? err.message : String(err)}\n`);
+    process.exit(1);
+  });
+  await connectRedisHealth();
   app.listen(port);
-  console.log(`🦊 ElyLiteChat is running at http://${app.server?.hostname}:${app.server?.port}`);
+  process.stdout.write(`ElyLiteChat listening on ${port}\n`);
+}
+
+async function connectRedisHealth(): Promise<void> {
+  await connectRedis();
+  await pingRedis();
 }
