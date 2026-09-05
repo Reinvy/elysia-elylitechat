@@ -68,7 +68,7 @@ export interface PaginationResult<T> {
   items: T[];
   total: number;
   hasMore: boolean;
-  cursor?: string;
+  cursor?: string | undefined;
 }
 
 export class ChatService {

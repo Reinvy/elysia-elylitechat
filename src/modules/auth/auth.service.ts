@@ -238,8 +238,8 @@ export class AuthService {
       deviceType: input.deviceType || "elylite",
       accessTokenHash: sha256hex(input.accessToken),
       refreshTokenHash: sha256hex(input.refreshToken),
-      ipAddress: input.ipAddress,
-      userAgent: input.userAgent,
+      ...(input.ipAddress !== undefined ? { ipAddress: input.ipAddress } : {}),
+      ...(input.userAgent !== undefined ? { userAgent: input.userAgent } : {}),
       expiresAt: new Date(Date.now() + 7 * 86400 * 1000),
       lastUsedAt: new Date(),
     };

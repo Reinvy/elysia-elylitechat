@@ -36,10 +36,10 @@ export class ChatController {
       const decoded = this.verifyAccessToken(token);
       
       const filter = {
-        participantId: query.participantId,
-        limit: query.limit ? parseInt(query.limit) : undefined,
-        offset: query.offset ? parseInt(query.offset) : undefined,
-        cursor: query.cursor
+        ...(query.participantId !== undefined ? { participantId: query.participantId } : {}),
+        ...(query.limit ? { limit: parseInt(query.limit) } : {}),
+        ...(query.offset ? { offset: parseInt(query.offset) } : {}),
+        ...(query.cursor !== undefined ? { cursor: query.cursor } : {}),
       };
 
       const result = await chatService.getConversations(decoded.userId, filter);
@@ -102,9 +102,9 @@ export class ChatController {
       
       const filter = {
         conversationId: params.id,
-        limit: query.limit ? parseInt(query.limit) : undefined,
-        offset: query.offset ? parseInt(query.offset) : undefined,
-        cursor: query.cursor
+        ...(query.limit ? { limit: parseInt(query.limit) } : {}),
+        ...(query.offset ? { offset: parseInt(query.offset) } : {}),
+        ...(query.cursor !== undefined ? { cursor: query.cursor } : {}),
       };
 
       const result = await chatService.getMessages(params.id, decoded.userId, filter);
