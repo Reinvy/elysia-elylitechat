@@ -130,6 +130,7 @@ export const bridgeRoute = new Elysia().group("/bridge", (app) =>
           conversationId: created.conversationId,
           senderId: created.senderId,
           content: created.content ?? created.fallbackText ?? "",
+          bridged: true,
         }).catch(() => undefined);
         return { success: true as const, data: { id: created.id, deduped: false } };
       } catch (error) {

@@ -36,6 +36,7 @@ export interface ChatNewFrame {
   u: string;
   tms: number;
   c: string;
+  bridged?: boolean;
 }
 
 export interface ReceiptFrame {
@@ -286,6 +287,7 @@ export async function broadcastNewMessage(message: {
   conversationId: string;
   senderId: string;
   content: string;
+  bridged?: boolean;
 }): Promise<void> {
   const frame: ChatNewFrame = {
     t: "chat:new",
@@ -294,6 +296,7 @@ export async function broadcastNewMessage(message: {
     u: message.senderId,
     tms: Date.now(),
     c: leanSnippet(message.content),
+    ...(message.bridged ? { bridged: true as const } : {}),
   };
   await publishJson(roomChannel(message.conversationId), frame);
 }
