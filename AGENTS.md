@@ -174,6 +174,7 @@ This checklist tracks the implementation progress of ElyLiteChat. Every AI Agent
 - [x] Export Eden `App` type (`export type App = typeof app`); `/api/v1/health` checks PG + Redis.
 - [x] Contract tests: canonical WS frames + typing debounce + lean receipts (`src/tests/websocket.test.ts`, 17/17 green with local PG + Redis).
 - [x] Fase 5 hardening: device sessions on register/login, refresh rotation + reuse-detection (chain wipe), session list/revoke endpoints, auth rate-limit (fail-open), idempotent `clientMsgId` send, `MISSING_FALLBACK` enforcement, JWT `jti` per issuance — 28/28 green.
+- [x] Bridge phases: `/bridge/export|import|redeem` endpoints, `bridged` fan-out flag, `tms` shape-lock tests — live E2E verified from the Full side (33/33 green).
 
 
 ---
