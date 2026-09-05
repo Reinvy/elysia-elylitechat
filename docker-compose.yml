@@ -16,6 +16,8 @@ services:
       - REDIS_URL=redis://redis:6379
       - JWT_SECRET=elylitechat-super-secret-jwt-key
       - JWT_REFRESH_SECRET=elylitechat-super-secret-refresh-key
+      - FULL_API_URL=http://elychat:3000
+      - BRIDGE_SHARED_SECRET=${BRIDGE_SHARED_SECRET:?set a 32+ char secret}
     depends_on:
       - postgres
       - redis

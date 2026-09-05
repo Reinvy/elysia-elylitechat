@@ -2,6 +2,7 @@ import { Elysia } from "elysia";
 import { openapi } from "@elysiajs/openapi";
 
 import { authRoute } from "./modules/auth/auth.routes.js";
+import { bridgeRoute } from "./modules/bridge/bridge.routes.js";
 import { rootRoute } from "./root.js";
 import { chatRoute } from "./modules/chat/chat.routes.js";
 import {
@@ -108,6 +109,7 @@ export const app = new Elysia()
   })
   .use(rootRoute)
   .use(authRoute)
+  .use(bridgeRoute)
   .use(chatRoute)
   .ws("/ws", {
     async open(ws) {
