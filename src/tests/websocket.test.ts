@@ -115,4 +115,29 @@ describe("ElyLiteChat - WebSocket & Redis PubSub Engine", () => {
 
     unsubscribe();
   });
+
+  it("should use tms (not t) for timestamps on every frame kind (cross-system contract)", async () => {
+    const convId = "conv_shape_lock";
+    const seen: any[] = [];
+    const unsubscribe = pubSub.subscribe(roomChannel(convId), (data) => {
+      seen.push(data);
+    });
+
+    await broadcastNewMessage({ id: "m", conversationId: convId, senderId: dummyUser.id, content: "x" });
+    await broadcastTypingEvent(convId, dummyUser, true);
+    const { broadcastDelivered, broadcastReadStatusUpdate } = await import("../modules/chat/websocket.js");
+    await broadcastDelivered(convId, dummyUser.id, "m");
+    await broadcastReadStatusUpdate(convId, dummyUser.id, "m");
+    await new Promise((r) => setTimeout(r, 200));
+
+    expect(seen.length).toBe(4);
+    for (const frame of seen) {
+      expect(typeof frame.tms).toBe("number");
+      expect(frame.t).not.toBe(1720000000);
+      expect(typeof frame.t).toBe("string");
+      expect(frame.bridged ?? false).toBe(false);
+    }
+
+    unsubscribe();
+  });
 });
